@@ -33,7 +33,7 @@ class StageClosedError(StagedPipelineError):
     """Попытка записи в закрытую стадию/вход (§7.1, правило 17 ресёрча)."""
 
 
-def _validate_label(label: str) -> str:
+def validate_label(label: str) -> str:
     """Проверить метку исхода: непустая строка не длиннее `MAX_LABEL_LENGTH`.
 
     Args:
@@ -66,7 +66,7 @@ class Outcome(Exception):  # noqa: N818  # не -Error: это не сбой, а
         Args:
             label: метка исхода (непустая, не длиннее `MAX_LABEL_LENGTH`).
         """
-        self.label: str = _validate_label(label)
+        self.label: str = validate_label(label)
         super().__init__(self.label)
 
 

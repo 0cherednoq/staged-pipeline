@@ -18,6 +18,15 @@ from staged_pipeline._errors import (
     StagedPipelineError,
     TopologyError,
 )
+from staged_pipeline._policy import (
+    Backoff,
+    Breaker,
+    ErrorRate,
+    Expo,
+    Fixed,
+    NoSuccess,
+    Retry,
+)
 
 try:
     __version__ = version("staged-pipeline")
@@ -25,11 +34,18 @@ except PackageNotFoundError:  # pragma: no cover - пакет не устано�
     __version__ = "0.0.0.dev0"
 
 __all__ = [
+    "Backoff",
+    "Breaker",
     "Clock",
     "ConfigurationError",
     "Error",
+    "ErrorRate",
+    "Expo",
+    "Fixed",
     "MonotonicClock",
+    "NoSuccess",
     "Outcome",
+    "Retry",
     "RoutingError",
     "Skip",
     "StageAborted",

@@ -138,7 +138,7 @@ known-first-party = ["staged_pipeline"]
 "unittest.mock.patch".msg = "Запрещено (§0.3): без monkeypatching реального кода."
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "D100", "D101", "D102", "D103", "D104", "ANN", "PLR2004", "SLF001", "INP001"]
+"tests/**" = ["S101", "D100", "D101", "D102", "D103", "D104", "ANN", "PLR2004", "SLF001", "INP001", "N818"]
 "examples/**" = ["D", "INP001", "T201", "ANN"]
 "scripts/**" = ["D", "INP001", "T201", "S603", "S607"]
 
@@ -225,9 +225,14 @@ type = "forbidden"
 source_modules = ["staged_pipeline"]
 forbidden_modules = ["tallyho"]
 
-# Нижний слой: фундаментальные модули независимы друг от друга (D-010).
-# По мере появления верхних слоёв этот контракт заменит полный `layers`.
+# Слоевой контракт, растёт по мере появления модулей (D-010). Сверху вниз:
+# верхний слой может импортировать нижние, но не наоборот; модули внутри одного
+# слоя (через `|`) независимы друг от друга.
 [[tool.importlinter.contracts]]
-name = "Фундамент независим (_errors, _clock)"
-type = "independence"
-modules = ["staged_pipeline._errors", "staged_pipeline._clock"]
+name = "Слои пакета"
+type = "layers"
+containers = ["staged_pipeline"]
+layers = [
+    "_policy",
+    "_errors | _clock",
+]
