@@ -149,6 +149,7 @@ known-first-party = ["staged_pipeline"]
 [tool.mypy]
 python_version = "3.13"
 files = ["src", "tests"]
+mypy_path = "examples"
 strict = true
 warn_unreachable = true
 warn_redundant_casts = true
@@ -165,6 +166,7 @@ enable_error_code = ["redundant-expr", "truthy-bool", "ignore-without-code", "po
 typeCheckingMode = "all"
 pythonVersion = "3.13"
 include = ["src", "tests"]
+extraPaths = ["examples"]
 # Непрактичные в тестах/коде правила «all»-режима; отключены точечно и с причиной.
 reportUnusedCallResult = false       # ctx.incr(...) и т.п. намеренно игнорируют результат
 reportUnnecessaryTypeIgnoreComment = true

@@ -15,6 +15,10 @@ from staged_pipeline._stage import SetSeenStore
 TIMEOUT = 3.0
 
 
+def _ident(value: object) -> object:
+    return value
+
+
 async def _until(predicate: Callable[[], bool]) -> None:
     for _ in range(1000):
         await asyncio.sleep(0)
@@ -59,7 +63,7 @@ async def test_resume_counts_as_found_and_skip() -> None:
         processed.append(n)
 
     pipe = Pipeline("resume")
-    stage = pipe.stage("s", handler, key=lambda n: n)
+    stage = pipe.stage("s", handler, key=_ident)
     stage.resume([1, 2], label="resumed")
     stage.seed([1, 2, 3])
     await asyncio.wait_for(pipe.run(), TIMEOUT)
@@ -85,7 +89,7 @@ async def test_retry_does_not_repass_dedup() -> None:
     pipe.stage(
         "s",
         handler,
-        key=lambda n: n,
+        key=_ident,
         retry=Retry(on=ValueError, attempts=2, backoff=Fixed(1.0)),
     ).seed([1])
 

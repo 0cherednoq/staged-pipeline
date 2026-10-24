@@ -31,7 +31,9 @@ __all__ = [
 ]
 
 Fallback = Literal["error", "drop"]
-KeyFn = Callable[[object], object]
+# Ключ дедупликации: вызывается с элементом (object), но принимаем и функции с
+# конкретным типом входа — отсюда `...` вместо `[object]` (контравариантность).
+KeyFn = Callable[..., object]
 
 
 def _empty_excmap() -> ExcMap:
