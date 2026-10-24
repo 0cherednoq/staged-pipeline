@@ -18,6 +18,7 @@ from staged_pipeline._errors import (
     StagedPipelineError,
     TopologyError,
 )
+from staged_pipeline._limit import Limit, Limiter
 from staged_pipeline._pipeline import Pipeline
 from staged_pipeline._policy import (
     Backoff,
@@ -45,6 +46,8 @@ __all__ = [
     "Expo",
     "Feeder",
     "Fixed",
+    "Limit",
+    "Limiter",
     "MonotonicClock",
     "NoSuccess",
     "Outcome",

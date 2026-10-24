@@ -242,6 +242,6 @@ layers = [
     "_supervisor",
     "_accounting",
     "_graph",
-    "_inbox | _policy",
+    "_inbox | _policy | _limit",
     "_errors | _clock",
 ]

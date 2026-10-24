@@ -14,6 +14,7 @@ from enum import Enum, auto
 from typing import Literal, cast
 
 from staged_pipeline._errors import ConfigurationError, TopologyError
+from staged_pipeline._limit import Limiter
 from staged_pipeline._policy import Breaker, ExcMap, Retry, validate_policies
 
 __all__ = [
@@ -186,6 +187,7 @@ class StageSpec:
     skip_on: ExcMap = field(default_factory=_empty_excmap)
     error_on: ExcMap = field(default_factory=_empty_excmap)
     abort_if: tuple[Breaker, ...] = ()
+    limits: tuple[Limiter, ...] = ()
     log_levels: Mapping[str, int] = field(default_factory=_empty_levels)
     executor: str | None = None
     seeded: bool = False

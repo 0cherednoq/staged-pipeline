@@ -14,6 +14,7 @@ from staged_pipeline._clock import Clock, MonotonicClock
 from staged_pipeline._errors import ConfigurationError
 from staged_pipeline._graph import KeyFn, StageSpec, validate_topology
 from staged_pipeline._inbox import Envelope, Inbox
+from staged_pipeline._limit import Limiter
 from staged_pipeline._policy import Breaker, ExcMap, Retry
 from staged_pipeline._stage import Stage, offer, run_worker
 from staged_pipeline._supervisor import Supervisor
@@ -70,6 +71,7 @@ class Pipeline:
         skip_on: ExcMap | None = None,
         error_on: ExcMap | None = None,
         abort_if: Breaker | Sequence[Breaker] | None = None,
+        limits: Sequence[Limiter] | None = None,
         log_levels: Mapping[str, int] | None = None,
         executor: str | None = None,
     ) -> Stage:
@@ -93,6 +95,7 @@ class Pipeline:
             skip_on=skip_on or {},
             error_on=error_on or {},
             abort_if=_normalize_breakers(abort_if),
+            limits=tuple(limits) if limits is not None else (),
             log_levels=log_levels or {},
             executor=executor,
         )

@@ -9,7 +9,8 @@ seed-элементы, рёбра. Воркер берёт элемент из i
 import asyncio
 import logging
 from collections.abc import Hashable, Iterable, Sequence
-from contextlib import aclosing
+from contextlib import AsyncExitStack, aclosing
+from types import TracebackType
 from typing import TYPE_CHECKING, Protocol, Self, cast, runtime_checkable
 
 from staged_pipeline._accounting import Event, Ledger
@@ -23,6 +24,7 @@ from staged_pipeline._errors import (
 )
 from staged_pipeline._graph import Fallback, HandlerKind, KeyFn, StageSpec
 from staged_pipeline._inbox import Envelope, Inbox
+from staged_pipeline._limit import Limiter
 from staged_pipeline._policy import (
     Breaker,
     BreakerStats,
@@ -290,6 +292,42 @@ async def _emit(stage: Stage, out: object, stages: dict[str, Stage], ledger: Led
     await offer(stages[target.name], out, ledger=ledger, stages=stages)
 
 
+class _Permits:
+    """Совокупный async-permit всех лимитеров стадии (нулевой при отсутствии)."""
+
+    def __init__(self, limits: tuple[Limiter, ...]) -> None:
+        """Запомнить лимитеры."""
+        self._limits: tuple[Limiter, ...] = limits
+        self._stack: AsyncExitStack = AsyncExitStack()
+
+    async def __aenter__(self) -> None:
+        """Занять все лимитеры по порядку."""
+        await self._stack.__aenter__()
+        for limiter in self._limits:
+            await self._stack.enter_async_context(limiter.acquire())
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        """Освободить все лимитеры."""
+        await self._stack.__aexit__(exc_type, exc, tb)
+
+
+async def _call(stage: Stage, env: Envelope[object], ctx: StageContext | None) -> object:
+    """Вызвать корутину/sync-хендлер под permit-ом лимитеров; вернуть результат."""
+    spec = stage.spec
+    async with _Permits(spec.limits):
+        if spec.info.kind is HandlerKind.SYNC:
+            if ctx is not None:
+                return await asyncio.to_thread(spec.handler, env.item, ctx)
+            return await asyncio.to_thread(spec.handler, env.item)
+        raw = spec.handler(env.item, ctx) if ctx is not None else spec.handler(env.item)
+        return await cast("Awaitable[object]", raw)
+
+
 async def _process(
     stage: Stage,
     env: Envelope[object],
@@ -298,7 +336,7 @@ async def _process(
     stages: dict[str, Stage],
     ledger: Ledger,
 ) -> str:
-    """Вызвать хендлер и разложить его выход по рёбрам; вернуть метку исхода ok."""
+    """Вызвать хендлер и разложить выход по рёбрам; permit — вокруг вызова, emit — вне (§7.5)."""
     spec = stage.spec
     info = spec.info
     ctx = (
@@ -310,19 +348,15 @@ async def _process(
         raw = spec.handler(env.item, ctx) if ctx is not None else spec.handler(env.item)
         gen = cast("AsyncGenerator[object]", raw)
         async with aclosing(gen) as stream:
-            async for out in stream:
-                await _emit(stage, out, stages, ledger)
-    elif info.kind is HandlerKind.SYNC:
-        result = (
-            await asyncio.to_thread(spec.handler, env.item, ctx)
-            if ctx is not None
-            else await asyncio.to_thread(spec.handler, env.item)
-        )
-        for out in _normalize(result):
-            await _emit(stage, out, stages, ledger)
+            while True:
+                async with _Permits(spec.limits):
+                    try:
+                        out = await stream.__anext__()
+                    except StopAsyncIteration:
+                        break
+                await _emit(stage, out, stages, ledger)  # emit вне permit-а
     else:
-        raw = spec.handler(env.item, ctx) if ctx is not None else spec.handler(env.item)
-        result = await cast("Awaitable[object]", raw)
+        result = await _call(stage, env, ctx)
         for out in _normalize(result):
             await _emit(stage, out, stages, ledger)
     return ctx.chosen_label if ctx is not None else "ok"
