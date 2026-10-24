@@ -93,9 +93,7 @@ deps = { cmd = "uvx deptry src", help = "deptry через uvx (не в lock —
 spell = { cmd = "uvx codespell src tests docs *.md", help = "codespell через uvx (нужна сеть/кэш, D-009)" }
 test = { cmd = "pytest", help = "Тесты + покрытие" }
 # Локальный оффлайн-гейт (D-009). deptry, codespell и check-github-workflows — на CI.
-# `api` (verifytypes) добавляется в гейт с T1.1, когда появляется публичный API
-# (на скелете 0 публичных символов → 0% completeness, ложное срабатывание).
-check = { sequence = ["lint", "types", "imports", "test"], help = "Полный локальный гейт (оффлайн)" }
+check = { sequence = ["lint", "types", "api", "imports", "test"], help = "Полный локальный гейт (оффлайн)" }
 bench = { cmd = "python scripts/bench.py", help = "Бенчмарк оверхеда на элемент (не гейт)" }
 
 # --------------------------------------------------------------------------- #
@@ -122,6 +120,9 @@ ignore = [
     "RUF001",  # комментарии/docstring на русском (§0.3): кириллица — не ошибка
     "RUF002",  # то же для docstring
     "RUF003",  # то же для комментариев
+    "EM101",   # текст ошибки инлайном — читаемее, чем обязательная переменная
+    "EM102",   # то же для f-string
+    "TRY003",  # длинные тексты в raise допустимы (§7.6 требует понятных сообщений)
 ]
 
 [tool.ruff.lint.pydocstyle]
@@ -164,6 +165,13 @@ include = ["src", "tests"]
 # Непрактичные в тестах/коде правила «all»-режима; отключены точечно и с причиной.
 reportUnusedCallResult = false       # ctx.incr(...) и т.п. намеренно игнорируют результат
 reportUnnecessaryTypeIgnoreComment = true
+
+# Тесты — белый ящик: обращение к внутренним полям и непроаннотированные
+# атрибуты фикстур допустимы.
+[[tool.basedpyright.executionEnvironments]]
+root = "tests"
+reportPrivateUsage = false
+reportUnannotatedClassAttribute = false
 
 # --------------------------------------------------------------------------- #
 # pytest + coverage                                                           #
@@ -216,3 +224,10 @@ name = "Ядро и интеграции не импортируют tallyho"
 type = "forbidden"
 source_modules = ["staged_pipeline"]
 forbidden_modules = ["tallyho"]
+
+# Нижний слой: фундаментальные модули независимы друг от друга (D-010).
+# По мере появления верхних слоёв этот контракт заменит полный `layers`.
+[[tool.importlinter.contracts]]
+name = "Фундамент независим (_errors, _clock)"
+type = "independence"
+modules = ["staged_pipeline._errors", "staged_pipeline._clock"]
