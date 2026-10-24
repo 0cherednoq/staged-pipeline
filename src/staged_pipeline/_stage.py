@@ -34,6 +34,7 @@ from staged_pipeline._policy import (
     SkipOutcome,
     classify,
 )
+from staged_pipeline._progress import EwmaTracker, Observer
 from staged_pipeline._supervisor import Supervisor
 
 if TYPE_CHECKING:
@@ -77,7 +78,15 @@ class SetSeenStore:
 class StageContext:
     """Контекст, передаваемый хендлеру вторым параметром (architecture.md §4.3)."""
 
-    def __init__(self, *, stage: str, attempt: int, clock: Clock, ledger: Ledger) -> None:
+    def __init__(
+        self,
+        *,
+        stage: str,
+        attempt: int,
+        clock: Clock,
+        ledger: Ledger,
+        stages: dict[str, "Stage"],
+    ) -> None:
         """Создать контекст для одного вызова хендлера.
 
         Args:
@@ -85,11 +94,13 @@ class StageContext:
             attempt: номер попытки (1-based).
             clock: часы пайплайна.
             ledger: реестр счётчиков (для `incr`).
+            stages: карта стадий (для `expect`).
         """
         self.stage: str = stage
         self.attempt: int = attempt
         self.clock: Clock = clock
         self._ledger: Ledger = ledger
+        self._stages: dict[str, Stage] = stages
         self._label: str = "ok"
 
     @property
@@ -104,6 +115,10 @@ class StageContext:
     def incr(self, name: str, n: int = 1) -> None:
         """Увеличить доменную метрику стадии."""
         self._ledger.incr(self.stage, name, n)
+
+    def expect(self, stage: str, *, add: int) -> None:
+        """Увеличить подсказку ожидаемого объёма стадии `stage` на `add` (§6)."""
+        self._stages[stage].expect_hint += add
 
 
 class Stage:
@@ -126,8 +141,15 @@ class Stage:
         self.resume_label: str = "resumed"
         # Последнее исходное исключение (для заметки при срабатывании abort_if).
         self.last_exc: BaseException | None = None
-        # inbox навешивается при старте run().
+        # inbox и tracker навешиваются при старте run().
         self.inbox: Inbox[object] | None = None
+        self.tracker: EwmaTracker | None = None
+        self.expect_hint: int = 0
+        self.warned: bool = False
+
+    def expect(self, n: int) -> None:
+        """Подсказать ожидаемый объём стадии (строка 2 таблицы §6)."""
+        self.expect_hint = n
 
     @property
     def key(self) -> KeyFn | None:
@@ -340,7 +362,9 @@ async def _process(
     spec = stage.spec
     info = spec.info
     ctx = (
-        StageContext(stage=spec.name, attempt=env.attempt, clock=clock, ledger=ledger)
+        StageContext(
+            stage=spec.name, attempt=env.attempt, clock=clock, ledger=ledger, stages=stages
+        )
         if info.wants_ctx
         else None
     )
@@ -379,13 +403,14 @@ def _breaker_stats(stage: Stage, ledger: Ledger, *, closing: bool) -> BreakerSta
     return BreakerStats(ok=counts.ok, error=counts.error, labels=counts.labels, closing=closing)
 
 
-def _check_breakers(stage: Stage, ledger: Ledger, *, closing: bool) -> None:
+def _check_breakers(stage: Stage, ledger: Ledger, observer: Observer, *, closing: bool) -> None:
     """Проверить предохранители; при срабатывании бросить исходное исключение/StageAborted."""
     if not stage.spec.abort_if:
         return
     stats = _breaker_stats(stage, ledger, closing=closing)
     for breaker in stage.spec.abort_if:
         if breaker.tripped(stats):
+            observer.breaker_tripped(stage.spec.name, breaker.reason(stats))
             raise _aborted(stage, breaker, stats)
 
 
@@ -399,16 +424,28 @@ def _aborted(stage: Stage, breaker: Breaker, stats: BreakerStats) -> BaseExcepti
     return StageAborted(note)
 
 
-async def run_worker(  # noqa: PLR0913  # воркеру нужны карта стадий, ledger, часы, лог, супервизор
+def _maybe_warn_queued(stage: Stage, ledger: Ledger, observer: Observer) -> None:
+    """Предупредить через observer, если очередь превысила `warn_queued` (однократно)."""
+    threshold = stage.spec.warn_queued
+    if threshold is None or stage.warned:
+        return
+    queued = ledger.counts(stage.spec.name).queued
+    if queued > threshold:
+        stage.warned = True
+        observer.queued_warning(stage.spec.name, queued)
+
+
+async def run_worker(  # noqa: PLR0913  # воркеру нужны карта стадий, ledger, часы, лог, observer, супервизор
     stage: Stage,
     *,
     clock: Clock,
     stages: dict[str, Stage],
     ledger: Ledger,
     log: logging.Logger,
+    observer: Observer,
     supervisor: Supervisor,
 ) -> None:
-    """Цикл воркера с политиками (§4.4, §4.5): ретрай/skip/error/abort и логирование."""
+    """Цикл воркера с политиками (§4.4, §4.5): ретрай/skip/error/abort, EWMA, observer."""
     name = stage.spec.name
     inbox = stage.inbox
     if inbox is None:  # pragma: no cover - воркер запускается только с inbox
@@ -417,11 +454,16 @@ async def run_worker(  # noqa: PLR0913  # воркеру нужны карта �
         while True:
             env = await inbox.get()
             if env is None:
-                _check_breakers(stage, ledger, closing=True)
+                _check_breakers(stage, ledger, observer, closing=True)
                 return
             ledger.transition(name, Event.START)
-            await _handle(stage, env, clock=clock, stages=stages, ledger=ledger, log=log)
-            _check_breakers(stage, ledger, closing=False)
+            start = clock.now()
+            outcome = await _handle(stage, env, clock=clock, stages=stages, ledger=ledger, log=log)
+            if outcome != "defer" and stage.tracker is not None:
+                stage.tracker.record(clock.now() - start)
+            observer.item_finished(name, None, outcome, None)
+            _check_breakers(stage, ledger, observer, closing=False)
+            _maybe_warn_queued(stage, ledger, observer)
     except Exception as exc:  # сбой/abort: зафиксировать первым и погасить остальных
         exc.add_note(f"stage={name}")
         supervisor.record(exc)
@@ -436,8 +478,8 @@ async def _handle(  # noqa: PLR0913  # обработчик элемента: н
     stages: dict[str, Stage],
     ledger: Ledger,
     log: logging.Logger,
-) -> None:
-    """Обработать один элемент: вызвать хендлер и классифицировать исключение (§4.4)."""
+) -> str:
+    """Обработать один элемент; вернуть исход (`ok`/`skip`/`error`/`defer`)."""
     name = stage.spec.name
     inbox = stage.inbox
     if inbox is None:  # pragma: no cover - воркер запускается только с inbox
@@ -456,9 +498,11 @@ async def _handle(  # noqa: PLR0913  # обработчик элемента: н
             case Deferral(delay=delay):
                 ledger.transition(name, Event.DEFER)
                 inbox.defer(Envelope(env.item, env.attempt + 1), clock.now() + delay)
+                return "defer"
             case SkipOutcome(label=skip_label):
                 _log_outcome(log, stage, env, exc, "skip")
                 ledger.transition(name, Event.SKIP, label=skip_label)
+                return "skip"
             case ErrorOutcome(label=error_label):
                 # Прямой raise Error — не «исходное» исключение (§4.5): abort даст
                 # StageAborted. Доменное исключение из error_on — исходное.
@@ -466,9 +510,11 @@ async def _handle(  # noqa: PLR0913  # обработчик элемента: н
                     stage.last_exc = exc
                 _log_outcome(log, stage, env, exc, "error")
                 ledger.transition(name, Event.ERROR, label=error_label)
+                return "error"
             case Failure():
                 stage.last_exc = exc
                 exc.add_note(f"attempt={env.attempt}")
                 raise
-        return
-    ledger.transition(name, Event.OK, label=label)
+    else:
+        ledger.transition(name, Event.OK, label=label)
+        return "ok"

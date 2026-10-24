@@ -29,6 +29,14 @@ from staged_pipeline._policy import (
     NoSuccess,
     Retry,
 )
+from staged_pipeline._progress import (
+    LoggingObserver,
+    Observer,
+    PipelineReport,
+    PipelineView,
+    StageState,
+    StageView,
+)
 from staged_pipeline._stage import Feeder, SeenStore, SetSeenStore, Stage, StageContext
 
 try:
@@ -48,10 +56,14 @@ __all__ = [
     "Fixed",
     "Limit",
     "Limiter",
+    "LoggingObserver",
     "MonotonicClock",
     "NoSuccess",
+    "Observer",
     "Outcome",
     "Pipeline",
+    "PipelineReport",
+    "PipelineView",
     "Retry",
     "RoutingError",
     "SeenStore",
@@ -61,6 +73,8 @@ __all__ = [
     "StageAborted",
     "StageClosedError",
     "StageContext",
+    "StageState",
+    "StageView",
     "StagedPipelineError",
     "TopologyError",
     "__version__",

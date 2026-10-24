@@ -239,6 +239,7 @@ containers = ["staged_pipeline"]
 layers = [
     "_pipeline",
     "_stage",
+    "_progress",
     "_supervisor",
     "_accounting",
     "_graph",

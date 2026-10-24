@@ -7,7 +7,7 @@ TaskGroup и ждёт естественного завершения (закр�
 
 import asyncio
 import logging
-from collections.abc import Callable, Coroutine, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Coroutine, Mapping, Sequence
 
 from staged_pipeline._accounting import Event, Ledger, StageCounts
 from staged_pipeline._clock import Clock, MonotonicClock
@@ -16,6 +16,15 @@ from staged_pipeline._graph import KeyFn, StageSpec, validate_topology
 from staged_pipeline._inbox import Envelope, Inbox
 from staged_pipeline._limit import Limiter
 from staged_pipeline._policy import Breaker, ExcMap, Retry
+from staged_pipeline._progress import (
+    EwmaTracker,
+    LoggingObserver,
+    Observer,
+    PipelineReport,
+    PipelineView,
+    StageState,
+    build_pipeline_view,
+)
 from staged_pipeline._stage import Stage, offer, run_worker
 from staged_pipeline._supervisor import Supervisor
 
@@ -42,6 +51,7 @@ class Pipeline:
         *,
         clock: Clock | None = None,
         log: logging.Logger | None = None,
+        observer: Observer | None = None,
     ) -> None:
         """Создать пайплайн.
 
@@ -49,14 +59,17 @@ class Pipeline:
             name: имя (для логов).
             clock: часы; по умолчанию `MonotonicClock`.
             log: логгер; по умолчанию `staged_pipeline`.
+            observer: наблюдатель событий; по умолчанию логирующий.
         """
         self.name: str = name
         self._clock: Clock = clock or MonotonicClock()
         self._log: logging.Logger = log or _log
+        self._observer: Observer = observer or LoggingObserver(self._log)
         self._stages: dict[str, Stage] = {}
         self._ran: bool = False
         self._ledger: Ledger | None = None
         self._supervisor: Supervisor | None = None
+        self._trackers: dict[str, EwmaTracker] = {}
         self.stopped: str | None = None
 
     def stage(  # noqa: PLR0913  # публичный конфигуратор стадии: много опций по §4.1
@@ -74,6 +87,7 @@ class Pipeline:
         limits: Sequence[Limiter] | None = None,
         log_levels: Mapping[str, int] | None = None,
         executor: str | None = None,
+        warn_queued: int | None = None,
     ) -> Stage:
         """Создать и зарегистрировать стадию.
 
@@ -98,6 +112,7 @@ class Pipeline:
             limits=tuple(limits) if limits is not None else (),
             log_levels=log_levels or {},
             executor=executor,
+            warn_queued=warn_queued,
         )
         stage = Stage(spec)
         self._stages[name] = stage
@@ -109,11 +124,14 @@ class Pipeline:
             raise RuntimeError("пайплайн ещё не запускался")
         return self._ledger.counts(name)
 
-    async def run(self, timeout: float | None = None) -> None:  # noqa: ASYNC109, C901  # таймаут — T3.3; run — оркестрация
+    async def run(self, timeout: float | None = None) -> PipelineReport:  # noqa: ASYNC109, C901  # timeout — §4.7; run — оркестрация
         """Запустить пайплайн и дождаться завершения всех компонент.
 
         Args:
-            timeout: пока не используется (реализуется в T3.3).
+            timeout: мягкий лимит; по истечении — cancel (§4.7).
+
+        Returns:
+            Итоговый отчёт (последний снимок + длительность + причина остановки).
 
         Raises:
             RuntimeError: повторный запуск.
@@ -123,10 +141,6 @@ class Pipeline:
         if self._ran:
             raise RuntimeError("Pipeline уже запускался: он одноразовый")
         self._ran = True
-        if timeout is not None:
-            self._log.debug(
-                "timeout=%s игнорируется в текущей версии (реализуется в T3.3)", timeout
-            )
 
         specs: list[StageSpec] = [s.spec for s in self._stages.values()]
         for warning in validate_topology(specs):
@@ -134,12 +148,15 @@ class Pipeline:
 
         for stage in self._stages.values():
             stage.inbox = Inbox(self._clock, maxsize=stage.spec.buffer)
+            stage.tracker = EwmaTracker(self._clock)
+            self._trackers[stage.spec.name] = stage.tracker
 
         def on_close(members: frozenset[str]) -> None:
             for member in members:
                 member_inbox = self._stages[member].inbox
                 if member_inbox is not None:
                     member_inbox.close()
+                self._observer.stage_closed(member)
 
         seed_inputs = {
             name: (1 if stage.has_auto_seed else 0) + len(stage.feeders)
@@ -165,14 +182,49 @@ class Pipeline:
         supervisor = Supervisor()
         self._supervisor = supervisor
         factories = self._worker_factories(ledger, supervisor)
+        start = self._clock.now()
         if timeout is None:
             await supervisor.run(factories)
-            return
-        try:
-            async with asyncio.timeout(timeout):
-                await supervisor.run(factories)
-        except TimeoutError:
-            self._hard_cancel("timeout")
+        else:
+            try:
+                async with asyncio.timeout(timeout):
+                    await supervisor.run(factories)
+            except TimeoutError:
+                self._hard_cancel("timeout")
+        return self._report(self._clock.now() - start)
+
+    def _report(self, duration: float) -> PipelineReport:
+        """Построить итоговый отчёт по текущему состоянию реестра."""
+        return PipelineReport(view=self.view(), duration=duration, stopped=self.stopped)
+
+    def view(self) -> PipelineView:
+        """Синхронный дешёвый снимок пайплайна (§4.8)."""
+        if self._ledger is None:
+            raise RuntimeError("пайплайн ещё не запускался")
+        specs = [s.spec for s in self._stages.values()]
+        expects = {name: stage.expect_hint for name, stage in self._stages.items()}
+        failed = self._supervisor is not None and self._supervisor.failure is not None
+        return build_pipeline_view(
+            self.name,
+            specs,
+            self._ledger,
+            self._trackers,
+            expects,
+            stopped=self.stopped,
+            failed=failed,
+        )
+
+    async def watch(self, interval: float = 1.0) -> "AsyncIterator[PipelineView]":
+        """Поток снимков раз в `interval`; заканчивается терминальным снимком (§4.8)."""
+        while True:
+            view = self.view()
+            yield view
+            if all(
+                s.state in (StageState.CLOSED, StageState.CANCELLED, StageState.FAILED)
+                for s in view.stages.values()
+            ):
+                return
+            await self._clock.sleep(interval)
 
     def cancel(self, reason: str = "cancel") -> None:
         """Немедленно остановить: воркеры отменены, остаток → cancelled (§4.7).
@@ -263,6 +315,7 @@ class Pipeline:
                         stages=self._stages,
                         ledger=ledger,
                         log=self._log,
+                        observer=self._observer,
                         supervisor=supervisor,
                     )
 

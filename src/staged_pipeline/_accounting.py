@@ -152,6 +152,14 @@ class Ledger:
         """Закрыта ли компонента, в которой лежит стадия."""
         return self._components[self._comp_of[stage]].closed
 
+    def component_writers(self, stage: str) -> int:
+        """Число открытых внешних писателей компоненты стадии."""
+        return self._components[self._comp_of[stage]].writers
+
+    def component_members(self, stage: str) -> frozenset[str]:
+        """Имена стадий в компоненте данной стадии."""
+        return self._components[self._comp_of[stage]].members
+
     def invariant_holds(self) -> bool:
         """Инвариант счётчиков выполняется для всех стадий."""
         return all(counts.invariant_holds() for counts in self._counts.values())

@@ -25,6 +25,7 @@ __all__ = [
     "TopologyWarning",
     "analyze_handler",
     "build_route_map",
+    "cyclic_stage_names",
     "strongly_connected_components",
     "validate_topology",
 ]
@@ -190,6 +191,7 @@ class StageSpec:
     limits: tuple[Limiter, ...] = ()
     log_levels: Mapping[str, int] = field(default_factory=_empty_levels)
     executor: str | None = None
+    warn_queued: int | None = None
     seeded: bool = False
     info: HandlerInfo = field(init=False)
     targets: list["StageSpec"] = field(default_factory=list, init=False)
@@ -316,6 +318,19 @@ def strongly_connected_components(specs: Sequence[StageSpec]) -> list[list[Stage
                 parent = work[-1][0]
                 lowlink[id(parent)] = min(lowlink[id(parent)], lowlink[id(node)])
     return result
+
+
+def cyclic_stage_names(specs: Sequence[StageSpec]) -> set[str]:
+    """Имена стадий, лежащих в цикле (компонента >1 или самопетля)."""
+    cyclic: set[str] = set()
+    for component in strongly_connected_components(specs):
+        if len(component) > 1:
+            cyclic.update(s.name for s in component)
+        else:
+            only = component[0]
+            if only in only.targets:
+                cyclic.add(only.name)
+    return cyclic
 
 
 def _in_cycle(specs: Sequence[StageSpec]) -> set[int]:
