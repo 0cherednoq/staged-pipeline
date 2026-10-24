@@ -18,6 +18,7 @@ from staged_pipeline._errors import (
     StagedPipelineError,
     TopologyError,
 )
+from staged_pipeline._pipeline import Pipeline
 from staged_pipeline._policy import (
     Backoff,
     Breaker,
@@ -27,6 +28,7 @@ from staged_pipeline._policy import (
     NoSuccess,
     Retry,
 )
+from staged_pipeline._stage import Stage, StageContext
 
 try:
     __version__ = version("staged-pipeline")
@@ -45,11 +47,14 @@ __all__ = [
     "MonotonicClock",
     "NoSuccess",
     "Outcome",
+    "Pipeline",
     "Retry",
     "RoutingError",
     "Skip",
+    "Stage",
     "StageAborted",
     "StageClosedError",
+    "StageContext",
     "StagedPipelineError",
     "TopologyError",
     "__version__",

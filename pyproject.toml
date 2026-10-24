@@ -237,6 +237,9 @@ name = "Слои пакета"
 type = "layers"
 containers = ["staged_pipeline"]
 layers = [
+    "_pipeline",
+    "_stage",
+    "_supervisor",
     "_accounting",
     "_graph",
     "_inbox | _policy",

@@ -227,6 +227,15 @@ class Ledger:
         """Увеличить доменную метрику стадии (`ctx.incr`)."""
         self._counts[stage].metrics[metric] += value
 
+    def check_all(self) -> None:
+        """Прогнать проверку закрытия по всем компонентам (вызов при старте run).
+
+        Закрывает компоненты, которые уже при старте удовлетворяют условию
+        (например, стадия без входа и без seed: writers=0, pending=0).
+        """
+        for comp in list(self._components):
+            self._check_close(comp)
+
     def seal_seed(self, stage: str) -> None:
         """Закрыть один открытый seed-вход стадии (writers компоненты -1)."""
         comp = self._components[self._comp_of[stage]]
