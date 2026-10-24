@@ -7,8 +7,8 @@
 ## Текущее состояние
 
 * **Ветка:** `impl/v1`
-* **Текущая задача:** T1.1 (следующая)
-* **Последний зелёный коммит:** `2c9fead` (T0.2)
+* **Текущая задача:** T1.2 / T1.3 / T2.1 (зависят только от T1.1)
+* **Последний зелёный коммит:** `2b5125d` (T1.1)
 * **Среда:** оффлайн (нет DNS/PyPI), тулчейн ставится из кэша uv — см. [D-009](DECISIONS.md).
 
 ## Задачи
@@ -17,7 +17,7 @@
 |---|---|---|---|---|
 | T0.1 | Скелет репозитория | — | done | `3945150` |
 | T0.2 | Гейты: линтеры, типы, import-linter, pytest, pre-commit | T0.1 | done | `2c9fead` |
-| T1.1 | Ошибки, исходы `Skip/Error`, `Clock`/`FakeClock` | T0.2 | todo | |
+| T1.1 | Ошибки, исходы `Skip/Error`, `Clock`/`FakeClock` | T0.2 | done | `2b5125d` |
 | T1.2 | Политики: `Retry`, классификация, `ErrorRate`/`NoSuccess` | T1.1 | todo | |
 | T1.3 | `Inbox`: готовые + отложенные, close/cancel с остатком | T1.1 | todo | |
 | T2.1 | Граф: стадии, рёбра, типы из аннотаций, SCC, проверки | T1.1 | todo | |
@@ -44,6 +44,14 @@
 ### 2026-10-24 · T0.1 · done
 Что сделано. Отклонения от плана. Что узнали.
 -->
+
+### 2026-10-24 · T1.1 · done
+`_errors.py` (иерархия + `Outcome`/`Skip`/`Error` с валидацией метки) и `_clock.py` (`Clock`,
+`MonotonicClock`, `FakeClock`). Публичный API в `__init__`. `api` (verifytypes) возвращён в гейт,
+import-linter дополнен independence-контрактом фундамента. Гейт зелёный (26 тестов, покрытие 98.77%).
+Мелочь: N818 для `StageAborted` подавлена точечно (имя из §4.5); убран `isinstance(label, str)` —
+тип гарантирует `str` (basedpyright reportUnreachable); для тестов ослаблены reportPrivateUsage/
+reportUnannotatedClassAttribute (белый ящик).
 
 ### 2026-10-24 · T0.2 · done
 Гейты: группы lint/test/dev (версии закреплены, ставятся из кэша uv), строгие ruff/mypy/basedpyright,
