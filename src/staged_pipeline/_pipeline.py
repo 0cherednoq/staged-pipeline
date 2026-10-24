@@ -67,6 +67,7 @@ class Pipeline:
         skip_on: ExcMap | None = None,
         error_on: ExcMap | None = None,
         abort_if: Breaker | Sequence[Breaker] | None = None,
+        log_levels: Mapping[str, int] | None = None,
     ) -> Stage:
         """Создать и зарегистрировать стадию.
 
@@ -88,6 +89,7 @@ class Pipeline:
             skip_on=skip_on or {},
             error_on=error_on or {},
             abort_if=_normalize_breakers(abort_if),
+            log_levels=log_levels or {},
         )
         stage = Stage(spec)
         self._stages[name] = stage
@@ -134,6 +136,14 @@ class Pipeline:
         ledger = Ledger(specs, on_close=on_close)
         self._ledger = ledger
 
+        # Дозревший отложенный элемент возвращается в очередь (deferred → queued).
+        for member, member_inbox in inboxes.items():
+
+            def promote(_: Envelope[object], name: str = member) -> None:
+                ledger.transition(name, Event.REDELIVER)
+
+            member_inbox.set_on_promote(promote)
+
         self._inject_seeds(ledger, inboxes)
         ledger.check_all()
 
@@ -172,6 +182,7 @@ class Pipeline:
                         inbox=inbox,
                         inboxes=inboxes,
                         ledger=ledger,
+                        log=self._log,
                         supervisor=supervisor,
                     )
 

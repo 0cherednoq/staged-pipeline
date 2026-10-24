@@ -6,19 +6,29 @@ seed-элементы, рёбра. Воркер берёт элемент из i
 политик нет: любое исключение хендлера — сбой пайплайна (D-001).
 """
 
+import logging
 from collections.abc import Iterable, Sequence
 from contextlib import aclosing
 from typing import TYPE_CHECKING, cast
 
 from staged_pipeline._accounting import Event, Ledger
 from staged_pipeline._clock import Clock
-from staged_pipeline._errors import RoutingError, validate_label
+from staged_pipeline._errors import Error, RoutingError, StageAborted, validate_label
 from staged_pipeline._graph import Fallback, StageSpec
+from staged_pipeline._inbox import Envelope, Inbox
+from staged_pipeline._policy import (
+    Breaker,
+    BreakerStats,
+    Deferral,
+    ErrorOutcome,
+    Failure,
+    SkipOutcome,
+    classify,
+)
+from staged_pipeline._supervisor import Supervisor
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable
-from staged_pipeline._inbox import Envelope, Inbox
-from staged_pipeline._supervisor import Supervisor
 
 __all__ = ["Stage", "StageContext"]
 
@@ -67,6 +77,8 @@ class Stage:
         """Обернуть спецификацию стадии."""
         self.spec: StageSpec = spec
         self.seed_items: list[object] = []
+        # Последнее исходное исключение (для заметки при срабатывании abort_if).
+        self.last_exc: BaseException | None = None
 
     def to(self, *targets: "Stage", fallback: str = "error") -> None:
         """Объявить рёбра к стадиям-получателям (делегирует `StageSpec.to`)."""
@@ -162,30 +174,108 @@ async def _process(
     return ctx.chosen_label if ctx is not None else "ok"
 
 
-async def run_worker(  # noqa: PLR0913  # воркеру нужны inbox, карта inbox-ов, ledger, супервизор
+def _log_outcome(
+    log: logging.Logger, stage: Stage, env: Envelope[object], exc: Exception, kind: str
+) -> None:
+    """Залогировать обработанный исход: WARNING строкой, DEBUG — трейсбек."""
+    level = stage.spec.log_levels.get(kind, logging.WARNING)
+    key = stage.spec.key(env.item) if stage.spec.key is not None else None
+    log.log(level, "%s %s: %s: %s", stage.spec.name, key, type(exc).__name__, exc)
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug("трейсбек исхода %s стадии %s", kind, stage.spec.name, exc_info=exc)
+
+
+def _breaker_stats(stage: Stage, ledger: Ledger, *, closing: bool) -> BreakerStats:
+    """Собрать снимок счётчиков стадии для проверки предохранителей."""
+    counts = ledger.counts(stage.spec.name)
+    return BreakerStats(ok=counts.ok, error=counts.error, labels=counts.labels, closing=closing)
+
+
+def _check_breakers(stage: Stage, ledger: Ledger, *, closing: bool) -> None:
+    """Проверить предохранители; при срабатывании бросить исходное исключение/StageAborted."""
+    if not stage.spec.abort_if:
+        return
+    stats = _breaker_stats(stage, ledger, closing=closing)
+    for breaker in stage.spec.abort_if:
+        if breaker.tripped(stats):
+            raise _aborted(stage, breaker, stats)
+
+
+def _aborted(stage: Stage, breaker: Breaker, stats: BreakerStats) -> BaseException:
+    """Построить исключение срабатывания предохранителя (§4.5)."""
+    note = f"aborted by {breaker.reason(stats)} at {stage.spec.name}"
+    exc = stage.last_exc
+    if exc is not None:
+        exc.add_note(note)
+        return exc
+    return StageAborted(note)
+
+
+async def run_worker(  # noqa: PLR0913  # воркеру нужны inbox, карта inbox-ов, ledger, лог, супервизор
     stage: Stage,
     *,
     clock: Clock,
     inbox: Inbox[object],
     inboxes: dict[str, Inbox[object]],
     ledger: Ledger,
+    log: logging.Logger,
     supervisor: Supervisor,
 ) -> None:
-    """Цикл воркера: брать из inbox, обрабатывать, фиксировать исход (§7.4).
-
-    В T2.3 любое исключение хендлера — сбой: записывается в супервизор (с заметкой
-    о стадии и попытке) и пробрасывается, что гасит остальные воркеры.
-    """
+    """Цикл воркера с политиками (§4.4, §4.5): ретрай/skip/error/abort и логирование."""
     name = stage.spec.name
-    while True:
-        env = await inbox.get()
-        if env is None:
-            return
-        ledger.transition(name, Event.START)
-        try:
-            label = await _process(stage, env, clock=clock, inboxes=inboxes, ledger=ledger)
-        except Exception as exc:  # T2.3: любое исключение = сбой (политики — T2.4)
-            exc.add_note(f"stage={name} attempt={env.attempt}")
-            supervisor.record(exc)
-            raise
-        ledger.transition(name, Event.OK, label=label)
+    try:
+        while True:
+            env = await inbox.get()
+            if env is None:
+                _check_breakers(stage, ledger, closing=True)
+                return
+            ledger.transition(name, Event.START)
+            await _handle(stage, env, clock=clock, inboxes=inboxes, ledger=ledger, log=log)
+            _check_breakers(stage, ledger, closing=False)
+    except Exception as exc:  # сбой/abort: зафиксировать первым и погасить остальных
+        exc.add_note(f"stage={name}")
+        supervisor.record(exc)
+        raise
+
+
+async def _handle(  # noqa: PLR0913  # обработчик элемента: нужны все рантайм-зависимости
+    stage: Stage,
+    env: Envelope[object],
+    *,
+    clock: Clock,
+    inboxes: dict[str, Inbox[object]],
+    ledger: Ledger,
+    log: logging.Logger,
+) -> None:
+    """Обработать один элемент: вызвать хендлер и классифицировать исключение (§4.4)."""
+    name = stage.spec.name
+    try:
+        label = await _process(stage, env, clock=clock, inboxes=inboxes, ledger=ledger)
+    except Exception as exc:
+        decision = classify(
+            exc,
+            retry=stage.spec.retry,
+            skip_on=stage.spec.skip_on,
+            error_on=stage.spec.error_on,
+            attempt=env.attempt,
+        )
+        match decision:
+            case Deferral(delay=delay):
+                ledger.transition(name, Event.DEFER)
+                inboxes[name].defer(Envelope(env.item, env.attempt + 1), clock.now() + delay)
+            case SkipOutcome(label=skip_label):
+                _log_outcome(log, stage, env, exc, "skip")
+                ledger.transition(name, Event.SKIP, label=skip_label)
+            case ErrorOutcome(label=error_label):
+                # Прямой raise Error — не «исходное» исключение (§4.5): abort даст
+                # StageAborted. Доменное исключение из error_on — исходное.
+                if not isinstance(exc, Error):
+                    stage.last_exc = exc
+                _log_outcome(log, stage, env, exc, "error")
+                ledger.transition(name, Event.ERROR, label=error_label)
+            case Failure():
+                stage.last_exc = exc
+                exc.add_note(f"attempt={env.attempt}")
+                raise
+        return
+    ledger.transition(name, Event.OK, label=label)

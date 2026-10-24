@@ -8,7 +8,7 @@ architecture.md §3 (модель), §4.2 (рёбра и маршрутизац�
 import inspect
 import types
 import typing
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Literal, cast
@@ -35,6 +35,12 @@ KeyFn = Callable[[object], object]
 def _empty_excmap() -> ExcMap:
     """Пустой маппинг исключений (типизированная фабрика для dataclass-поля)."""
     empty: ExcMap = {}
+    return empty
+
+
+def _empty_levels() -> Mapping[str, int]:
+    """Пустой маппинг уровней логирования (типизированная фабрика поля)."""
+    empty: Mapping[str, int] = {}
     return empty
 
 
@@ -163,6 +169,7 @@ class StageSpec:
     skip_on: ExcMap = field(default_factory=_empty_excmap)
     error_on: ExcMap = field(default_factory=_empty_excmap)
     abort_if: tuple[Breaker, ...] = ()
+    log_levels: Mapping[str, int] = field(default_factory=_empty_levels)
     seeded: bool = False
     info: HandlerInfo = field(init=False)
     targets: list["StageSpec"] = field(default_factory=list, init=False)

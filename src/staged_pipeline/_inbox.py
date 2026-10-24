@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import heapq
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from staged_pipeline._clock import Clock
@@ -57,6 +58,11 @@ class Inbox[T]:
         self._get_waiters: deque[asyncio.Future[None]] = deque()
         self._put_waiters: deque[asyncio.Future[None]] = deque()
         self._closed: bool = False
+        self._on_promote: Callable[[Envelope[T]], None] | None = None
+
+    def set_on_promote(self, callback: Callable[[Envelope[T]], None]) -> None:
+        """Задать колбэк, вызываемый при переносе отложенного в готовые (для учёта)."""
+        self._on_promote = callback
 
     @property
     def len_ready(self) -> int:
@@ -162,6 +168,8 @@ class Inbox[T]:
         while self._deferred and self._deferred[0][0] <= now:
             _, _, env = heapq.heappop(self._deferred)
             self._ready.append(env)
+            if self._on_promote is not None:
+                self._on_promote(env)
 
     def close(self) -> None:
         """Закрыть вход: новые элементы не принимаются, ждущие разбужены.
