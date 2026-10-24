@@ -4,7 +4,26 @@ __pycache__/
 build/
 dist/
 wheels/
-*.egg-info
+*.egg-info/
+.eggs/
 
 # Virtual environments
-.venv
+.venv/
+
+# Тестирование и покрытие
+.pytest_cache/
+.hypothesis/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.basedpyright/
+
+# Секреты
+.env
+
+# IDE
+.idea/
+.vscode/
