@@ -90,7 +90,7 @@ types = { sequence = ["_mypy", "_pyright"], help = "mypy --strict и basedpyrigh
 api = { cmd = "basedpyright --verifytypes staged_pipeline --ignoreexternal", help = "Полнота типов публичного API" }
 imports = { cmd = "lint-imports", help = "import-linter: слои и запреты" }
 deps = { cmd = "uvx deptry src", help = "deptry через uvx (не в lock — нужна сеть/кэш, D-009)" }
-spell = { cmd = "uvx codespell src tests docs *.md", help = "codespell через uvx (нужна сеть/кэш, D-009)" }
+spell = { cmd = "uvx codespell src tests docs README.md CHANGELOG.md AGENTS.md", help = "codespell через uvx (нужна сеть/кэш, D-009)" }
 test = { cmd = "pytest", help = "Тесты + покрытие" }
 # Локальный оффлайн-гейт (D-009). deptry, codespell и check-github-workflows — на CI.
 check = { sequence = ["lint", "types", "api", "imports", "test"], help = "Полный локальный гейт (оффлайн)" }
@@ -209,6 +209,14 @@ exclude_also = [
 # --------------------------------------------------------------------------- #
 [tool.deptry]
 known_first_party = ["staged_pipeline"]
+
+# --------------------------------------------------------------------------- #
+# codespell (запускается через uvx / pre-commit — D-009)                      #
+# --------------------------------------------------------------------------- #
+[tool.codespell]
+skip = "*.lock,./.git,./.venv"
+# Комментарии и docstring на русском; английские «ложные» слова добавлять сюда.
+ignore-words-list = ""
 
 # --------------------------------------------------------------------------- #
 # import-linter                                                               #

@@ -1,0 +1,80 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    uses: ./.github/workflows/check.yml
+
+  build:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build
+      - name: тег совпадает с версией
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          ver=$(uv run --no-sync python -c "import staged_pipeline; print(staged_pipeline.__version__)")
+          if [ "$tag" != "$ver" ]; then
+            echo "тег '$tag' не совпадает с версией пакета '$ver'"
+            exit 1
+          fi
+      - run: uv run --with twine twine check --strict dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  smoke:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        py: ["3.13", "3.14"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.py }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - run: uv run --isolated --no-project --find-links dist --with staged-pipeline python -c "import staged_pipeline; print(staged_pipeline.__version__)"
+
+  publish:
+    needs: smoke
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: GitHub Release
+        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

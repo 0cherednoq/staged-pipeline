@@ -1,0 +1,54 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+concurrency:
+  group: check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run poe check
+      - run: uv run poe deps
+      - run: uv run poe spell
+      - name: pre-commit (локальные хуки уже покрыты poe check)
+        run: uv run pre-commit run --all-files --show-diff-on-failure
+        env:
+          SKIP: ruff-format,ruff-check,mypy,import-linter,pytest
+
+  py314:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.14"
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run poe test
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build
+      - run: uv run --with twine twine check --strict dist/*
+      - name: smoke-импорт колеса в чистом окружении
+        run: uv run --isolated --no-project --find-links dist --with staged-pipeline python -c "import staged_pipeline; print(staged_pipeline.__version__)"
