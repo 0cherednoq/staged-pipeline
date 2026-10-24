@@ -7,8 +7,8 @@
 ## Текущее состояние
 
 * **Ветка:** `impl/v1`
-* **Текущая задача:** T5.2 (README) / T6.1 (CI)
-* **Последний зелёный коммит:** `f135d35` (T5.1)
+* **Текущая задача:** T6.1 (CI)
+* **Последний зелёный коммит:** `a96ced5` (T5.2)
 * **Среда:** оффлайн (нет DNS/PyPI), тулчейн ставится из кэша uv — см. [D-009](DECISIONS.md).
 
 ## Задачи
@@ -31,7 +31,7 @@
 | T4.1 | Прогресс: view, watch, expected, ETA, Observer | T3.1, T3.2, T3.3, T3.4 | done | `9da27a0` |
 | T4.2 | `staged_pipeline.testing` | T4.1 | done | `208cd69` |
 | T5.1 | Интеграция tallyho | T4.1 | done | `f135d35` |
-| T5.2 | README и исполняемые примеры | T4.2 | todo | |
+| T5.2 | README и исполняемые примеры | T4.2 | done | `a96ced5` |
 | T6.1 | CI: check.yml, release.yml, dependabot | T0.2 | todo | |
 | T7.1 | GitHub через `.env`: `poe github` | T6.1 | todo | |
 | T7.2 | PyPI pending trusted publisher | T7.1 | human | |
@@ -44,6 +44,11 @@
 ### 2026-10-24 · T0.1 · done
 Что сделано. Отклонения от плана. Что узнали.
 -->
+
+### 2026-10-24 · T5.2 · done
+README (что это/не является, установка, quickstart, таблица, ссылки), `examples/crawler.py` и
+`examples/export.py`, исполняемые в `tests/test_examples.py`. `KeyFn` → `Callable[..., object]`.
+Гейт зелёный (168, 96.27%).
 
 ### 2026-10-24 · T5.1 · done
 `integrations/tallyho.py`: `TallyhoItemLike`, `track` (прогресс/incr/drain), `outcome_for`;
