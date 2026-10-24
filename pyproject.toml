@@ -46,3 +46,173 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/staged_pipeline"]
+
+# --------------------------------------------------------------------------- #
+# Группы инструментов. Версии закреплены (==), ставятся из кэша uv (D-009).    #
+# codespell и check-jsonschema намеренно вне групп (D-009): их нет в кэше, а   #
+# одна некэшированная зависимость роняет весь оффлайн-`uv sync`.               #
+# --------------------------------------------------------------------------- #
+[dependency-groups]
+lint = [
+    "ruff==0.17.2",
+    "mypy==2.4.0",
+    "basedpyright==1.40.1",
+    "import-linter==2.15",
+    "validate-pyproject==0.26",
+]
+test = [
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "pytest-cov==7.1.0",
+    "pytest-timeout==2.4.0",
+    "hypothesis==6.168.1",
+    # coverage закреплён на кэшированную версию (pytest-cov тянет новее, блоба нет — D-009).
+    "coverage==7.15.4",
+]
+dev = [
+    { include-group = "lint" },
+    { include-group = "test" },
+    "poethepoet==0.48.0",
+    "pre-commit==4.7.0",
+]
+
+# --------------------------------------------------------------------------- #
+# poe-задачи                                                                  #
+# --------------------------------------------------------------------------- #
+[tool.poe.tasks]
+fmt = { cmd = "ruff format", help = "Отформатировать код" }
+_fmtcheck = "ruff format --check"
+_ruff = "ruff check"
+lint = { sequence = ["_fmtcheck", "_ruff"], help = "ruff: формат-чек и правила" }
+_mypy = "mypy"
+_pyright = "basedpyright"
+types = { sequence = ["_mypy", "_pyright"], help = "mypy --strict и basedpyright (all)" }
+api = { cmd = "basedpyright --verifytypes staged_pipeline --ignoreexternal", help = "Полнота типов публичного API" }
+imports = { cmd = "lint-imports", help = "import-linter: слои и запреты" }
+deps = { cmd = "uvx deptry src", help = "deptry через uvx (не в lock — нужна сеть/кэш, D-009)" }
+spell = { cmd = "uvx codespell src tests docs *.md", help = "codespell через uvx (нужна сеть/кэш, D-009)" }
+test = { cmd = "pytest", help = "Тесты + покрытие" }
+# Локальный оффлайн-гейт (D-009). deptry, codespell и check-github-workflows — на CI.
+# `api` (verifytypes) добавляется в гейт с T1.1, когда появляется публичный API
+# (на скелете 0 публичных символов → 0% completeness, ложное срабатывание).
+check = { sequence = ["lint", "types", "imports", "test"], help = "Полный локальный гейт (оффлайн)" }
+bench = { cmd = "python scripts/bench.py", help = "Бенчмарк оверхеда на элемент (не гейт)" }
+
+# --------------------------------------------------------------------------- #
+# ruff                                                                        #
+# --------------------------------------------------------------------------- #
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+src = ["src", "tests"]
+# ruff 0.17 форматирует Python-блоки в Markdown; документы — не наш код-стайл.
+extend-exclude = ["*.md", "docs"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "COM812",  # конфликтует с форматтером (висячая запятая)
+    "ISC001",  # конфликтует с форматтером (неявная конкатенация строк)
+    "D203",    # несовместимо с D211 (пустая строка перед docstring класса)
+    "D213",    # несовместимо с D212 (multi-line summary на второй строке)
+    "TD002",   # автор у TODO не требуется
+    "TD003",   # ссылка на issue у TODO не требуется
+    "FIX002",  # наличие TODO — не ошибка
+    "CPY001",  # заголовок с копирайтом в каждом файле не требуется
+    "RUF001",  # комментарии/docstring на русском (§0.3): кириллица — не ошибка
+    "RUF002",  # то же для docstring
+    "RUF003",  # то же для комментариев
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+known-first-party = ["staged_pipeline"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"typing.Any".msg = "Any запрещён (§0.3): конкретный тип или Protocol."
+"asyncio.get_event_loop".msg = "Запрещено (§0.3): asyncio.get_running_loop()."
+"logging.basicConfig".msg = "Запрещено (§0.3): библиотека не трогает корневой логгер."
+"unittest.mock.patch".msg = "Запрещено (§0.3): без monkeypatching реального кода."
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "D100", "D101", "D102", "D103", "D104", "ANN", "PLR2004", "SLF001", "INP001"]
+"examples/**" = ["D", "INP001", "T201", "ANN"]
+"scripts/**" = ["D", "INP001", "T201", "S603", "S607"]
+
+# --------------------------------------------------------------------------- #
+# mypy (strict)                                                               #
+# --------------------------------------------------------------------------- #
+[tool.mypy]
+python_version = "3.13"
+files = ["src", "tests"]
+strict = true
+warn_unreachable = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+disallow_any_explicit = true
+enable_error_code = ["redundant-expr", "truthy-bool", "ignore-without-code", "possibly-undefined"]
+
+# --------------------------------------------------------------------------- #
+# basedpyright (строжайший режим)                                             #
+# --------------------------------------------------------------------------- #
+[tool.basedpyright]
+typeCheckingMode = "all"
+pythonVersion = "3.13"
+include = ["src", "tests"]
+# Непрактичные в тестах/коде правила «all»-режима; отключены точечно и с причиной.
+reportUnusedCallResult = false       # ctx.incr(...) и т.п. намеренно игнорируют результат
+reportUnnecessaryTypeIgnoreComment = true
+
+# --------------------------------------------------------------------------- #
+# pytest + coverage                                                           #
+# --------------------------------------------------------------------------- #
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers --strict-config --cov=staged_pipeline --cov-report=term-missing --cov-fail-under=90"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+timeout = 5
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+branch = true
+source = ["staged_pipeline"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "^\\s*\\.\\.\\.\\s*$",
+    "if __name__ == .__main__.:",
+]
+
+# --------------------------------------------------------------------------- #
+# deptry (запускается через uvx, не входит в lock — D-009)                     #
+# --------------------------------------------------------------------------- #
+[tool.deptry]
+known_first_party = ["staged_pipeline"]
+
+# --------------------------------------------------------------------------- #
+# import-linter                                                               #
+# --------------------------------------------------------------------------- #
+# На скелете действует только forbidden-контракт (D-010): ядро и интеграции не
+# импортируют tallyho (architecture.md §9.3). Полное расслоение добавляется с
+# T1.1 по мере появления модулей. Целевые слои (PLAN.md T0.2, сверху вниз):
+#   integrations | testing
+#   _pipeline
+#   _stage | _supervisor
+#   _accounting | _progress | _policy | _limit | _inbox | _graph
+#   _errors | _clock | _types
+[tool.importlinter]
+root_package = "staged_pipeline"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Ядро и интеграции не импортируют tallyho"
+type = "forbidden"
+source_modules = ["staged_pipeline"]
+forbidden_modules = ["tallyho"]
