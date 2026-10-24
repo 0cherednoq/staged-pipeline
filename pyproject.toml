@@ -111,6 +111,7 @@ select = ["ALL"]
 ignore = [
     "COM812",  # конфликтует с форматтером (висячая запятая)
     "ISC001",  # конфликтует с форматтером (неявная конкатенация строк)
+    "ISC003",  # конфликтует с basedpyright reportImplicitStringConcatenation (нужен явный +)
     "D203",    # несовместимо с D211 (пустая строка перед docstring класса)
     "D213",    # несовместимо с D212 (multi-line summary на второй строке)
     "TD002",   # автор у TODO не требуется
@@ -138,7 +139,7 @@ known-first-party = ["staged_pipeline"]
 "unittest.mock.patch".msg = "Запрещено (§0.3): без monkeypatching реального кода."
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "D100", "D101", "D102", "D103", "D104", "ANN", "PLR2004", "SLF001", "INP001", "N818"]
+"tests/**" = ["S101", "D100", "D101", "D102", "D103", "D104", "ANN", "PLR2004", "SLF001", "INP001", "N818", "PLR0913"]
 "examples/**" = ["D", "INP001", "T201", "ANN"]
 "scripts/**" = ["D", "INP001", "T201", "S603", "S607"]
 
@@ -152,7 +153,9 @@ strict = true
 warn_unreachable = true
 warn_redundant_casts = true
 warn_unused_ignores = true
-disallow_any_explicit = true
+# disallow_any_explicit НЕ включаем: он считает `Callable[..., object]` (тип
+# динамически разбираемого хендлера) за Any. Литеральный `typing.Any` и так
+# запрещён ruff banned-api (§0.3).
 enable_error_code = ["redundant-expr", "truthy-bool", "ignore-without-code", "possibly-undefined"]
 
 # --------------------------------------------------------------------------- #
@@ -172,6 +175,7 @@ reportUnnecessaryTypeIgnoreComment = true
 root = "tests"
 reportPrivateUsage = false
 reportUnannotatedClassAttribute = false
+reportUnusedParameter = false  # фиктивные хендлеры в тестах не используют параметры
 
 # --------------------------------------------------------------------------- #
 # pytest + coverage                                                           #
@@ -233,6 +237,7 @@ name = "Слои пакета"
 type = "layers"
 containers = ["staged_pipeline"]
 layers = [
+    "_graph",
     "_inbox | _policy",
     "_errors | _clock",
 ]
