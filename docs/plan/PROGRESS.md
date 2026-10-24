@@ -7,8 +7,8 @@
 ## Текущее состояние
 
 * **Ветка:** `impl/v1`
-* **Текущая задача:** T6.1 (CI)
-* **Последний зелёный коммит:** `a96ced5` (T5.2)
+* **Текущая задача:** T7.1 (GitHub через .env) — ограничена оффлайн-средой
+* **Последний зелёный коммит:** `960892c` (T6.1)
 * **Среда:** оффлайн (нет DNS/PyPI), тулчейн ставится из кэша uv — см. [D-009](DECISIONS.md).
 
 ## Задачи
@@ -32,7 +32,7 @@
 | T4.2 | `staged_pipeline.testing` | T4.1 | done | `208cd69` |
 | T5.1 | Интеграция tallyho | T4.1 | done | `f135d35` |
 | T5.2 | README и исполняемые примеры | T4.2 | done | `a96ced5` |
-| T6.1 | CI: check.yml, release.yml, dependabot | T0.2 | todo | |
+| T6.1 | CI: check.yml, release.yml, dependabot | T0.2 | done | `960892c` |
 | T7.1 | GitHub через `.env`: `poe github` | T6.1 | todo | |
 | T7.2 | PyPI pending trusted publisher | T7.1 | human | |
 | T8.1 | Релиз 0.1.0a1 (тег — человек) | T5.1, T5.2, T7.1, T7.2 | todo | |
@@ -44,6 +44,11 @@
 ### 2026-10-24 · T0.1 · done
 Что сделано. Отклонения от плана. Что узнали.
 -->
+
+### 2026-10-24 · T6.1 · done
+`.github/workflows/check.yml` (check ubuntu+windows py3.13, py314, build+smoke), `release.yml`
+(тег→check→build→smoke→PyPI Trusted Publishing→GitHub Release), `dependabot.yml`, конфиг codespell.
+YAML валиден локально; схему проверит `check-github-workflows` на CI (T7.1). Гейт зелёный (168).
 
 ### 2026-10-24 · T5.2 · done
 README (что это/не является, установка, quickstart, таблица, ссылки), `examples/crawler.py` и
