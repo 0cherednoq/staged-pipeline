@@ -7,8 +7,8 @@
 ## Текущее состояние
 
 * **Ветка:** `impl/v1`
-* **Текущая задача:** T4.1 (прогресс и наблюдение)
-* **Последний зелёный коммит:** `c81bd6d` (T3.4)
+* **Текущая задача:** T4.2 (staged_pipeline.testing)
+* **Последний зелёный коммит:** `9da27a0` (T4.1)
 * **Среда:** оффлайн (нет DNS/PyPI), тулчейн ставится из кэша uv — см. [D-009](DECISIONS.md).
 
 ## Задачи
@@ -28,7 +28,7 @@
 | T3.2 | Маршрутизация по типу, `executor="thread"` | T2.4 | done | `b66360b` |
 | T3.3 | `cancel`, `drain`, таймаут | T2.4 | done | `03987b0` |
 | T3.4 | Лимиты | T2.4 | done | `c81bd6d` |
-| T4.1 | Прогресс: view, watch, expected, ETA, Observer | T3.1, T3.2, T3.3, T3.4 | todo | |
+| T4.1 | Прогресс: view, watch, expected, ETA, Observer | T3.1, T3.2, T3.3, T3.4 | done | `9da27a0` |
 | T4.2 | `staged_pipeline.testing` | T4.1 | todo | |
 | T5.1 | Интеграция tallyho | T4.1 | todo | |
 | T5.2 | README и исполняемые примеры | T4.2 | todo | |
@@ -44,6 +44,10 @@
 ### 2026-10-24 · T0.1 · done
 Что сделано. Отклонения от плана. Что узнали.
 -->
+
+### 2026-10-24 · T4.1 · done
+`_progress.py`: view/watch/report, EWMA, `expected` по §6, ETA, Observer/LoggingObserver,
+`expect`, `warn_queued`. `run()` теперь возвращает `PipelineReport`. Гейт зелёный (158, 96.01%).
 
 ### 2026-10-24 · T3.4 · done
 `_limit.py`: `Limiter`/`Limit` (атомарная конкурентность через Condition + token bucket на Clock),
