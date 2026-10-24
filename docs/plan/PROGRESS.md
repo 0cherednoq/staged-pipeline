@@ -7,8 +7,8 @@
 ## Текущее состояние
 
 * **Ветка:** `impl/v1`
-* **Текущая задача:** T7.1 (GitHub через .env) — ограничена оффлайн-средой
-* **Последний зелёный коммит:** `960892c` (T6.1)
+* **Текущая задача:** — (все оставшиеся требуют сети/человека)
+* **Последний зелёный коммит:** `acb0d99` (T7.1 артефакт)
 * **Среда:** оффлайн (нет DNS/PyPI), тулчейн ставится из кэша uv — см. [D-009](DECISIONS.md).
 
 ## Задачи
@@ -33,7 +33,7 @@
 | T5.1 | Интеграция tallyho | T4.1 | done | `f135d35` |
 | T5.2 | README и исполняемые примеры | T4.2 | done | `a96ced5` |
 | T6.1 | CI: check.yml, release.yml, dependabot | T0.2 | done | `960892c` |
-| T7.1 | GitHub через `.env`: `poe github` | T6.1 | todo | |
+| T7.1 | GitHub через `.env`: `poe github` | T6.1 | blocked | `acb0d99` (скрипт) |
 | T7.2 | PyPI pending trusted publisher | T7.1 | human | |
 | T8.1 | Релиз 0.1.0a1 (тег — человек) | T5.1, T5.2, T7.1, T7.2 | todo | |
 | T9.1 | Миграция checker_account (другой репозиторий) | T8.1 | todo | |
@@ -44,6 +44,13 @@
 ### 2026-10-24 · T0.1 · done
 Что сделано. Отклонения от плана. Что узнали.
 -->
+
+### 2026-10-24 · T7.1 · blocked
+Скрипт `scripts/github_bootstrap.py` + `poe github` написаны и проходят ruff (коммит `acb0d99`); без
+`.env` корректно выходят. **Blocked:** выполнение (создание GitHub-репозитория, push, проверка CI)
+требует сети и `GH_TOKEN`, а среда оффлайн (нет DNS/PyPI/GitHub, D-009). Нужен человек/сеть: заполнить
+`.env` (GH_TOKEN) и запустить `uv run poe github`, затем убедиться, что `gh run list` показывает
+зелёный `check`. Пока T7.1 не выполнен на GitHub, зависимые T7.2 (human), T8.1 и T9.1 не стартуют.
 
 ### 2026-10-24 · T6.1 · done
 `.github/workflows/check.yml` (check ubuntu+windows py3.13, py314, build+smoke), `release.yml`
