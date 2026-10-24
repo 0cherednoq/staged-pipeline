@@ -95,6 +95,7 @@ test = { cmd = "pytest", help = "Тесты + покрытие" }
 # Локальный оффлайн-гейт (D-009). deptry, codespell и check-github-workflows — на CI.
 check = { sequence = ["lint", "types", "api", "imports", "test"], help = "Полный локальный гейт (оффлайн)" }
 bench = { cmd = "python scripts/bench.py", help = "Бенчмарк оверхеда на элемент (не гейт)" }
+github = { cmd = "python scripts/github_bootstrap.py", help = "Настроить GitHub-репозиторий из .env (T7.1)" }
 
 # --------------------------------------------------------------------------- #
 # ruff                                                                        #
