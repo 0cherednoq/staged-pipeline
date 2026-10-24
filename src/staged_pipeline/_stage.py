@@ -260,6 +260,10 @@ async def offer(
     inbox = stages[name].inbox
     if inbox is None:  # pragma: no cover - offer зовётся только во время run
         raise RuntimeError("стадия не инициализирована")
+    if inbox.closed:
+        # Стадия уже закрыта (cancel/drain или завершена) — тихо отбрасываем.
+        ledger.incr(name, "dropped_on_stop")
+        return
     key = stage.key(item) if stage.key is not None else None
     if key is not None and isinstance(key, Hashable):
         if key in stage.resumed:

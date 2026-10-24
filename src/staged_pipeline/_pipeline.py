@@ -5,6 +5,7 @@
 TaskGroup и ждёт естественного завершения (закрытие всех компонент по §7.2).
 """
 
+import asyncio
 import logging
 from collections.abc import Callable, Coroutine, Mapping, Sequence
 
@@ -54,6 +55,8 @@ class Pipeline:
         self._stages: dict[str, Stage] = {}
         self._ran: bool = False
         self._ledger: Ledger | None = None
+        self._supervisor: Supervisor | None = None
+        self.stopped: str | None = None
 
     def stage(  # noqa: PLR0913  # публичный конфигуратор стадии: много опций по §4.1
         self,
@@ -157,8 +160,80 @@ class Pipeline:
         ledger.check_all()
 
         supervisor = Supervisor()
+        self._supervisor = supervisor
         factories = self._worker_factories(ledger, supervisor)
-        await supervisor.run(factories)
+        if timeout is None:
+            await supervisor.run(factories)
+            return
+        try:
+            async with asyncio.timeout(timeout):
+                await supervisor.run(factories)
+        except TimeoutError:
+            self._hard_cancel("timeout")
+
+    def cancel(self, reason: str = "cancel") -> None:
+        """Немедленно остановить: воркеры отменены, остаток → cancelled (§4.7).
+
+        Идемпотентно. После `cancel`/`drain` `run()` завершается с
+        `pipe.stopped`, а не бросает исключение.
+        """
+        if self.stopped is not None:
+            return
+        self.stopped = "cancel"
+        self._log.info("пайплайн %s отменён: %s", self.name, reason)
+        self._cancel_queues()
+        if self._supervisor is not None:
+            self._supervisor.cancel_all()
+
+    async def drain(self, timeout: float | None = None) -> None:  # noqa: ASYNC109  # timeout — доменный параметр §4.7
+        """Мягко остановить: входы закрыты, in-flight доделываются, остаток → cancelled.
+
+        queued/deferred отменяются сразу; in-flight доигрывают. По истечении
+        `timeout` (если воркеры не завершились) — переход в `cancel()`. Идемпотентно.
+        """
+        if self.stopped is not None:
+            return
+        self.stopped = "drain"
+        self._log.info("пайплайн %s в режиме drain", self.name)
+        for stage in self._stages.values():
+            for feeder in stage.feeders:
+                feeder.close()
+        self._cancel_queues()
+        if timeout is not None and self._supervisor is not None:
+            await self._drain_watch(timeout)
+
+    async def _drain_watch(self, timeout: float) -> None:  # noqa: ASYNC109  # эскалация drain→cancel
+        """Подождать `timeout`; если воркеры ещё живы — перейти в cancel."""
+        supervisor = self._supervisor
+        if supervisor is None:  # pragma: no cover
+            return
+        await self._clock.sleep(timeout)
+        if any(not task.done() for task in supervisor.tasks):
+            self._hard_cancel("drain-timeout")
+
+    def _hard_cancel(self, reason: str) -> None:
+        """Жёсткая отмена (из cancel/таймаута), не трогая уже выставленный stopped."""
+        if self.stopped is None:
+            self.stopped = "cancel"
+        self._log.info("пайплайн %s жёстко остановлен: %s", self.name, reason)
+        self._cancel_queues()
+        if self._supervisor is not None:
+            self._supervisor.cancel_all()
+
+    def _cancel_queues(self) -> None:
+        """Учесть очереди (queued+deferred) как cancelled и опустошить входы."""
+        if self._ledger is None:
+            return
+        for name, stage in self._stages.items():
+            inbox = stage.inbox
+            if inbox is None:
+                continue
+            ready, deferred = inbox.len_ready, inbox.len_deferred
+            if ready:
+                self._ledger.transition(name, Event.CANCEL_QUEUED, count=ready)
+            if deferred:
+                self._ledger.transition(name, Event.CANCEL_DEFERRED, count=deferred)
+            inbox.cancel()
 
     async def _inject_seeds(self, ledger: Ledger) -> None:
         """Засеять входы (через dedup/resume) и запечатать авто-seed-входы."""
