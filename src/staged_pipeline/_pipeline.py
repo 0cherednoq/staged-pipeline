@@ -68,6 +68,7 @@ class Pipeline:
         error_on: ExcMap | None = None,
         abort_if: Breaker | Sequence[Breaker] | None = None,
         log_levels: Mapping[str, int] | None = None,
+        executor: str | None = None,
     ) -> Stage:
         """Создать и зарегистрировать стадию.
 
@@ -90,6 +91,7 @@ class Pipeline:
             error_on=error_on or {},
             abort_if=_normalize_breakers(abort_if),
             log_levels=log_levels or {},
+            executor=executor,
         )
         stage = Stage(spec)
         self._stages[name] = stage

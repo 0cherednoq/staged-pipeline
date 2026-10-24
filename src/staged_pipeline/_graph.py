@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Literal, cast
 
-from staged_pipeline._errors import TopologyError
+from staged_pipeline._errors import ConfigurationError, TopologyError
 from staged_pipeline._policy import Breaker, ExcMap, Retry, validate_policies
 
 __all__ = [
@@ -51,6 +51,8 @@ class HandlerKind(Enum):
     """`async def ...` — возвращает `None`/`Out`/`list`/`tuple`."""
     ASYNC_GEN = auto()
     """`async def ...: yield ...` — потоковый fan-out."""
+    SYNC = auto()
+    """`def ...` — синхронный хендлер, запускается через `asyncio.to_thread` (executor="thread")."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,12 +109,13 @@ def _element_types(annotation: object, *, streaming: bool) -> tuple[type, ...]:
     return _split_union(annotation)
 
 
-def analyze_handler(handler: Callable[..., object]) -> HandlerInfo:
+def analyze_handler(handler: Callable[..., object], *, executor: str | None = None) -> HandlerInfo:
     """Разобрать сигнатуру хендлера: вид, наличие ctx, типы входа и выхода.
 
     Args:
-        handler: `async def` корутина или асинхронный генератор; `(item)` или
-            `(item, ctx)`.
+        handler: корутина, async-генератор или (при executor='thread') sync-функция;
+            `(item)` или `(item, ctx)`.
+        executor: 'thread' — хендлер синхронный (запуск через to_thread); иначе async.
 
     Returns:
         Разбор сигнатуры.
@@ -122,8 +125,17 @@ def analyze_handler(handler: Callable[..., object]) -> HandlerInfo:
             аннотациями.
     """
     streaming = inspect.isasyncgenfunction(handler)
-    if not streaming and not inspect.iscoroutinefunction(handler):
-        raise TopologyError(f"хендлер {handler!r} должен быть async def или async-генератором")
+    is_async = streaming or inspect.iscoroutinefunction(handler)
+    if executor == "thread":
+        if is_async:
+            raise TopologyError(
+                f"хендлер {handler!r} с executor='thread' должен быть синхронным def"
+            )
+    elif not is_async:
+        raise TopologyError(
+            f"хендлер {handler!r} должен быть async def или async-генератором "
+            + "(для синхронного укажите executor='thread')"
+        )
 
     signature = inspect.signature(handler)
     params = [
@@ -141,7 +153,12 @@ def analyze_handler(handler: Callable[..., object]) -> HandlerInfo:
         raise TopologyError(f"не удалось разобрать аннотации хендлера {handler!r}: {exc}") from exc
 
     in_types = _split_union(hints.get(params[0].name))
-    kind = HandlerKind.ASYNC_GEN if streaming else HandlerKind.COROUTINE
+    if streaming:
+        kind = HandlerKind.ASYNC_GEN
+    elif is_async:
+        kind = HandlerKind.COROUTINE
+    else:
+        kind = HandlerKind.SYNC
     out_types = _element_types(hints.get("return"), streaming=streaming)
     return HandlerInfo(
         kind=kind,
@@ -170,6 +187,7 @@ class StageSpec:
     error_on: ExcMap = field(default_factory=_empty_excmap)
     abort_if: tuple[Breaker, ...] = ()
     log_levels: Mapping[str, int] = field(default_factory=_empty_levels)
+    executor: str | None = None
     seeded: bool = False
     info: HandlerInfo = field(init=False)
     targets: list["StageSpec"] = field(default_factory=list, init=False)
@@ -177,7 +195,11 @@ class StageSpec:
 
     def __post_init__(self) -> None:
         """Разобрать хендлер и проверить непротиворечивость политик."""
-        self.info = analyze_handler(self.handler)
+        if self.executor is not None and self.executor != "thread":
+            raise ConfigurationError(
+                f"executor должен быть None или 'thread', получено {self.executor!r}"
+            )
+        self.info = analyze_handler(self.handler, executor=self.executor)
         validate_policies(self.retry, self.skip_on, self.error_on)
 
     def to(self, *targets: "StageSpec", fallback: Fallback = "error") -> None:

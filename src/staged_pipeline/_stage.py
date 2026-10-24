@@ -6,6 +6,7 @@ seed-элементы, рёбра. Воркер берёт элемент из i
 политик нет: любое исключение хендлера — сбой пайплайна (D-001).
 """
 
+import asyncio
 import logging
 from collections.abc import Hashable, Iterable, Sequence
 from contextlib import aclosing
@@ -20,7 +21,7 @@ from staged_pipeline._errors import (
     StageClosedError,
     validate_label,
 )
-from staged_pipeline._graph import Fallback, KeyFn, StageSpec
+from staged_pipeline._graph import Fallback, HandlerKind, KeyFn, StageSpec
 from staged_pipeline._inbox import Envelope, Inbox
 from staged_pipeline._policy import (
     Breaker,
@@ -307,6 +308,14 @@ async def _process(
         async with aclosing(gen) as stream:
             async for out in stream:
                 await _emit(stage, out, stages, ledger)
+    elif info.kind is HandlerKind.SYNC:
+        result = (
+            await asyncio.to_thread(spec.handler, env.item, ctx)
+            if ctx is not None
+            else await asyncio.to_thread(spec.handler, env.item)
+        )
+        for out in _normalize(result):
+            await _emit(stage, out, stages, ledger)
     else:
         raw = spec.handler(env.item, ctx) if ctx is not None else spec.handler(env.item)
         result = await cast("Awaitable[object]", raw)
