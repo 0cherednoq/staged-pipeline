@@ -24,6 +24,8 @@ class Event(Enum):
     """Предложен и принят: ключ → seen. `found+1`, `queued+1`."""
     DUPLICATE = auto()
     """Предложен, но ключ уже принят. `duplicates+1`."""
+    RESUME = auto()
+    """Ключ уже сделан (resume): `found+1`, `skip+1` — не ставится в очередь."""
     START = auto()
     """Воркер взял из очереди. `queued-1`, `in_flight+1`."""
     OK = auto()
@@ -180,6 +182,11 @@ class Ledger:
                 comp.pending += 1
             case Event.DUPLICATE:
                 counts.duplicates += 1
+            case Event.RESUME:
+                # resumed-ключ: сразу found + skip, в очередь не ставится (§4.6).
+                counts.found += 1
+                counts.skip += 1
+                counts.labels[label or "resumed"] += 1
             case Event.START:
                 counts.queued -= 1
                 counts.in_flight += 1

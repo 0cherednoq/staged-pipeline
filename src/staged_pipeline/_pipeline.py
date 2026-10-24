@@ -14,7 +14,7 @@ from staged_pipeline._errors import ConfigurationError
 from staged_pipeline._graph import KeyFn, StageSpec, validate_topology
 from staged_pipeline._inbox import Envelope, Inbox
 from staged_pipeline._policy import Breaker, ExcMap, Retry
-from staged_pipeline._stage import Stage, run_worker
+from staged_pipeline._stage import Stage, offer, run_worker
 from staged_pipeline._supervisor import Supervisor
 
 __all__ = ["Pipeline"]
@@ -101,7 +101,7 @@ class Pipeline:
             raise RuntimeError("пайплайн ещё не запускался")
         return self._ledger.counts(name)
 
-    async def run(self, timeout: float | None = None) -> None:  # noqa: ASYNC109  # таймаут — T3.3
+    async def run(self, timeout: float | None = None) -> None:  # noqa: ASYNC109, C901  # таймаут — T3.3; run — оркестрация
         """Запустить пайплайн и дождаться завершения всех компонент.
 
         Args:
@@ -124,63 +124,63 @@ class Pipeline:
         for warning in validate_topology(specs):
             self._log.warning("стадия %s: %s", warning.stage, warning.message)
 
-        inboxes: dict[str, Inbox[object]] = {
-            name: Inbox(self._clock, maxsize=stage.spec.buffer)
-            for name, stage in self._stages.items()
-        }
+        for stage in self._stages.values():
+            stage.inbox = Inbox(self._clock, maxsize=stage.spec.buffer)
 
         def on_close(members: frozenset[str]) -> None:
             for member in members:
-                inboxes[member].close()
+                member_inbox = self._stages[member].inbox
+                if member_inbox is not None:
+                    member_inbox.close()
 
-        ledger = Ledger(specs, on_close=on_close)
+        seed_inputs = {
+            name: (1 if stage.has_auto_seed else 0) + len(stage.feeders)
+            for name, stage in self._stages.items()
+        }
+        ledger = Ledger(specs, seed_inputs=seed_inputs, on_close=on_close)
         self._ledger = ledger
 
         # Дозревший отложенный элемент возвращается в очередь (deferred → queued).
-        for member, member_inbox in inboxes.items():
+        for name, stage in self._stages.items():
+            if stage.inbox is not None:
 
-            def promote(_: Envelope[object], name: str = member) -> None:
-                ledger.transition(name, Event.REDELIVER)
+                def promote(_: Envelope[object], stage_name: str = name) -> None:
+                    ledger.transition(stage_name, Event.REDELIVER)
 
-            member_inbox.set_on_promote(promote)
+                stage.inbox.set_on_promote(promote)
+            for feeder in stage.feeders:
+                feeder.bind(ledger, self._stages)
 
-        self._inject_seeds(ledger, inboxes)
+        await self._inject_seeds(ledger)
         ledger.check_all()
 
         supervisor = Supervisor()
-        factories = self._worker_factories(inboxes, ledger, supervisor)
+        factories = self._worker_factories(ledger, supervisor)
         await supervisor.run(factories)
 
-    def _inject_seeds(self, ledger: Ledger, inboxes: Mapping[str, Inbox[object]]) -> None:
-        """Засеять входы и запечатать seed-входы (вход закрывается при старте)."""
+    async def _inject_seeds(self, ledger: Ledger) -> None:
+        """Засеять входы (через dedup/resume) и запечатать авто-seed-входы."""
         for name, stage in self._stages.items():
-            if not stage.spec.seeded:
-                continue
             for item in stage.seed_items:
-                ledger.transition(name, Event.ACCEPT)
-                inboxes[name].put_nowait(Envelope(item))
-            ledger.seal_seed(name)
+                await offer(stage, item, ledger=ledger, stages=self._stages, nowait=True)
+            if stage.has_auto_seed:
+                ledger.seal_seed(name)
 
     def _worker_factories(
         self,
-        inboxes: dict[str, Inbox[object]],
         ledger: Ledger,
         supervisor: Supervisor,
     ) -> list[Callable[[], Coroutine[object, object, None]]]:
         """Построить фабрики корутин-воркеров (по `workers` на стадию)."""
         factories: list[Callable[[], Coroutine[object, object, None]]] = []
-        for name, stage in self._stages.items():
-            inbox = inboxes[name]
+        for stage in self._stages.values():
             for _ in range(stage.spec.workers):
 
-                def factory(
-                    stage: Stage = stage, inbox: Inbox[object] = inbox
-                ) -> Coroutine[object, object, None]:
+                def factory(stage: Stage = stage) -> Coroutine[object, object, None]:
                     return run_worker(
                         stage,
                         clock=self._clock,
-                        inbox=inbox,
-                        inboxes=inboxes,
+                        stages=self._stages,
                         ledger=ledger,
                         log=self._log,
                         supervisor=supervisor,

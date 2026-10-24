@@ -7,14 +7,20 @@ seed-элементы, рёбра. Воркер берёт элемент из i
 """
 
 import logging
-from collections.abc import Iterable, Sequence
+from collections.abc import Hashable, Iterable, Sequence
 from contextlib import aclosing
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Protocol, Self, cast, runtime_checkable
 
 from staged_pipeline._accounting import Event, Ledger
 from staged_pipeline._clock import Clock
-from staged_pipeline._errors import Error, RoutingError, StageAborted, validate_label
-from staged_pipeline._graph import Fallback, StageSpec
+from staged_pipeline._errors import (
+    Error,
+    RoutingError,
+    StageAborted,
+    StageClosedError,
+    validate_label,
+)
+from staged_pipeline._graph import Fallback, KeyFn, StageSpec
 from staged_pipeline._inbox import Envelope, Inbox
 from staged_pipeline._policy import (
     Breaker,
@@ -30,7 +36,39 @@ from staged_pipeline._supervisor import Supervisor
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable
 
-__all__ = ["Stage", "StageContext"]
+__all__ = ["Feeder", "SeenStore", "SetSeenStore", "Stage", "StageContext"]
+
+
+@runtime_checkable
+class SeenStore(Protocol):
+    """Хранилище принятых ключей для дедупликации (architecture.md §4.6)."""
+
+    def add(self, key: Hashable) -> bool:
+        """Добавить ключ; вернуть True, если он новый (ещё не встречался)."""
+        ...
+
+    def __contains__(self, key: object) -> bool:
+        """Был ли ключ уже принят."""
+        ...
+
+
+class SetSeenStore:
+    """Реализация `SeenStore` поверх `set` (v1)."""
+
+    def __init__(self) -> None:
+        """Создать пустое хранилище."""
+        self._seen: set[Hashable] = set()
+
+    def add(self, key: Hashable) -> bool:
+        """Добавить ключ; True — если он был новым."""
+        if key in self._seen:
+            return False
+        self._seen.add(key)
+        return True
+
+    def __contains__(self, key: object) -> bool:
+        """Был ли ключ принят."""
+        return key in self._seen
 
 
 class StageContext:
@@ -73,12 +111,25 @@ class Stage:
     хендлера рантаймом (статический вывод отложен, D-012).
     """
 
-    def __init__(self, spec: StageSpec) -> None:
+    def __init__(self, spec: StageSpec, *, seen: SeenStore | None = None) -> None:
         """Обернуть спецификацию стадии."""
         self.spec: StageSpec = spec
         self.seed_items: list[object] = []
+        self.has_auto_seed: bool = False
+        self.feeders: list[Feeder] = []
+        # Дедупликация и resume (architecture.md §4.6).
+        self.seen: SeenStore = seen if seen is not None else SetSeenStore()
+        self.resumed: set[Hashable] = set()
+        self.resume_label: str = "resumed"
         # Последнее исходное исключение (для заметки при срабатывании abort_if).
         self.last_exc: BaseException | None = None
+        # inbox навешивается при старте run().
+        self.inbox: Inbox[object] | None = None
+
+    @property
+    def key(self) -> KeyFn | None:
+        """Функция ключа дедупликации (или None)."""
+        return self.spec.key
 
     def to(self, *targets: "Stage", fallback: str = "error") -> None:
         """Объявить рёбра к стадиям-получателям (делегирует `StageSpec.to`)."""
@@ -88,7 +139,64 @@ class Stage:
     def seed(self, items: Iterable[object]) -> None:
         """Засеять вход элементами (вход закроется при старте `run()`)."""
         self.spec.seeded = True
+        self.has_auto_seed = True
         self.seed_items.extend(items)
+
+    def resume(self, keys: Iterable[Hashable], *, label: str = "resumed") -> None:
+        """Пометить ключи уже сделанного: при встрече → `found` + `skip(label)` (§4.6)."""
+        self.resume_label = validate_label(label)
+        self.resumed.update(keys)
+
+    def seed_open(self) -> "Feeder":
+        """Открыть вход-Feeder: вход не закроется, пока `Feeder.close()` не вызван."""
+        self.spec.seeded = True
+        feeder = Feeder(self)
+        self.feeders.append(feeder)
+        return feeder
+
+
+class Feeder:
+    """Открытый вход стадии: `put()` во время прогона, `close()` закрывает (§4.6)."""
+
+    def __init__(self, stage: Stage) -> None:
+        """Создать Feeder, привязанный к стадии (активируется при старте run)."""
+        self._stage: Stage = stage
+        self._ledger: Ledger | None = None
+        self._stages: dict[str, Stage] | None = None
+        self._closed: bool = False
+
+    def bind(self, ledger: Ledger, stages: dict[str, Stage]) -> None:
+        """Привязать Feeder к рантайму (вызывается из `Pipeline.run`)."""
+        self._ledger = ledger
+        self._stages = stages
+
+    async def put(self, item: object) -> None:
+        """Предложить элемент стадии (проходит dedup/resume).
+
+        Raises:
+            RuntimeError: пайплайн ещё не запущен.
+            StageClosedError: Feeder уже закрыт.
+        """
+        if self._ledger is None or self._stages is None:
+            raise RuntimeError("Feeder.put до запуска пайплайна")
+        if self._closed:
+            raise StageClosedError("Feeder уже закрыт")
+        await offer(self._stage, item, ledger=self._ledger, stages=self._stages)
+
+    def close(self) -> None:
+        """Закрыть вход: снять writer компоненты. Идемпотентно."""
+        if self._closed or self._ledger is None:
+            return
+        self._closed = True
+        self._ledger.seal_seed(self._stage.spec.name)
+
+    async def __aenter__(self) -> "Self":
+        """Войти в контекст (Feeder уже открыт)."""
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        """Выйти из контекста — закрыть вход."""
+        self.close()
 
 
 def _normalize(result: object) -> list[object]:
@@ -101,7 +209,7 @@ def _normalize(result: object) -> list[object]:
 
 
 def _route(stage: Stage, out: object, ledger: Ledger) -> StageSpec | None:
-    """Выбрать стадию-получателя по типу выхода (architecture.md §4.2).
+    """Выбрать спецификацию стадии-получателя по типу выхода (architecture.md §4.2).
 
     Returns:
         Спецификация получателя или None (терминальная стадия / `drop`).
@@ -132,16 +240,49 @@ def _route(stage: Stage, out: object, ledger: Ledger) -> StageSpec | None:
     )
 
 
-async def _emit(
-    stage: Stage, out: object, inboxes: dict[str, Inbox[object]], ledger: Ledger
+async def offer(
+    stage: Stage,
+    item: object,
+    *,
+    ledger: Ledger,
+    stages: dict[str, Stage],
+    nowait: bool = False,
 ) -> None:
+    """Предложить элемент стадии: dedup/resume, затем постановка в очередь (§4.6).
+
+    Один путь приёма для seed, emit и Feeder: ключ помечается принятым при приёме
+    (ретрай его не проходит повторно, т.к. использует `defer`). resumed-ключ даёт
+    `found`+`skip`; повтор принятого ключа — `duplicate`. `nowait` — для засева до
+    старта воркеров (не ждёт место в bounded-очереди).
+    """
+    name = stage.spec.name
+    inbox = stages[name].inbox
+    if inbox is None:  # pragma: no cover - offer зовётся только во время run
+        raise RuntimeError("стадия не инициализирована")
+    key = stage.key(item) if stage.key is not None else None
+    if key is not None and isinstance(key, Hashable):
+        if key in stage.resumed:
+            stage.resumed.discard(key)
+            stage.seen.add(key)
+            ledger.transition(name, Event.RESUME, label=stage.resume_label)
+            return
+        if not stage.seen.add(key):
+            ledger.transition(name, Event.DUPLICATE)
+            return
+    ledger.transition(name, Event.ACCEPT)
+    if nowait:
+        inbox.put_nowait(Envelope(item))
+    else:
+        await inbox.put(Envelope(item))
+
+
+async def _emit(stage: Stage, out: object, stages: dict[str, Stage], ledger: Ledger) -> None:
     """Отправить один выходной элемент получателю (ACCEPT до выхода родителя, §7.2)."""
     target = _route(stage, out, ledger)
     if target is None:
         return
     ledger.emit(stage.spec.name, target.name)
-    ledger.transition(target.name, Event.ACCEPT)
-    await inboxes[target.name].put(Envelope(out))
+    await offer(stages[target.name], out, ledger=ledger, stages=stages)
 
 
 async def _process(
@@ -149,7 +290,7 @@ async def _process(
     env: Envelope[object],
     *,
     clock: Clock,
-    inboxes: dict[str, Inbox[object]],
+    stages: dict[str, Stage],
     ledger: Ledger,
 ) -> str:
     """Вызвать хендлер и разложить его выход по рёбрам; вернуть метку исхода ok."""
@@ -165,12 +306,12 @@ async def _process(
         gen = cast("AsyncGenerator[object]", raw)
         async with aclosing(gen) as stream:
             async for out in stream:
-                await _emit(stage, out, inboxes, ledger)
+                await _emit(stage, out, stages, ledger)
     else:
         raw = spec.handler(env.item, ctx) if ctx is not None else spec.handler(env.item)
         result = await cast("Awaitable[object]", raw)
         for out in _normalize(result):
-            await _emit(stage, out, inboxes, ledger)
+            await _emit(stage, out, stages, ledger)
     return ctx.chosen_label if ctx is not None else "ok"
 
 
@@ -211,18 +352,20 @@ def _aborted(stage: Stage, breaker: Breaker, stats: BreakerStats) -> BaseExcepti
     return StageAborted(note)
 
 
-async def run_worker(  # noqa: PLR0913  # воркеру нужны inbox, карта inbox-ов, ledger, лог, супервизор
+async def run_worker(  # noqa: PLR0913  # воркеру нужны карта стадий, ledger, часы, лог, супервизор
     stage: Stage,
     *,
     clock: Clock,
-    inbox: Inbox[object],
-    inboxes: dict[str, Inbox[object]],
+    stages: dict[str, Stage],
     ledger: Ledger,
     log: logging.Logger,
     supervisor: Supervisor,
 ) -> None:
     """Цикл воркера с политиками (§4.4, §4.5): ретрай/skip/error/abort и логирование."""
     name = stage.spec.name
+    inbox = stage.inbox
+    if inbox is None:  # pragma: no cover - воркер запускается только с inbox
+        raise RuntimeError("стадия не инициализирована")
     try:
         while True:
             env = await inbox.get()
@@ -230,7 +373,7 @@ async def run_worker(  # noqa: PLR0913  # воркеру нужны inbox, ка�
                 _check_breakers(stage, ledger, closing=True)
                 return
             ledger.transition(name, Event.START)
-            await _handle(stage, env, clock=clock, inboxes=inboxes, ledger=ledger, log=log)
+            await _handle(stage, env, clock=clock, stages=stages, ledger=ledger, log=log)
             _check_breakers(stage, ledger, closing=False)
     except Exception as exc:  # сбой/abort: зафиксировать первым и погасить остальных
         exc.add_note(f"stage={name}")
@@ -243,14 +386,17 @@ async def _handle(  # noqa: PLR0913  # обработчик элемента: н
     env: Envelope[object],
     *,
     clock: Clock,
-    inboxes: dict[str, Inbox[object]],
+    stages: dict[str, Stage],
     ledger: Ledger,
     log: logging.Logger,
 ) -> None:
     """Обработать один элемент: вызвать хендлер и классифицировать исключение (§4.4)."""
     name = stage.spec.name
+    inbox = stage.inbox
+    if inbox is None:  # pragma: no cover - воркер запускается только с inbox
+        raise RuntimeError("стадия не инициализирована")
     try:
-        label = await _process(stage, env, clock=clock, inboxes=inboxes, ledger=ledger)
+        label = await _process(stage, env, clock=clock, stages=stages, ledger=ledger)
     except Exception as exc:
         decision = classify(
             exc,
@@ -262,7 +408,7 @@ async def _handle(  # noqa: PLR0913  # обработчик элемента: н
         match decision:
             case Deferral(delay=delay):
                 ledger.transition(name, Event.DEFER)
-                inboxes[name].defer(Envelope(env.item, env.attempt + 1), clock.now() + delay)
+                inbox.defer(Envelope(env.item, env.attempt + 1), clock.now() + delay)
             case SkipOutcome(label=skip_label):
                 _log_outcome(log, stage, env, exc, "skip")
                 ledger.transition(name, Event.SKIP, label=skip_label)

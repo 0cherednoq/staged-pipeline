@@ -28,7 +28,7 @@ from staged_pipeline._policy import (
     NoSuccess,
     Retry,
 )
-from staged_pipeline._stage import Stage, StageContext
+from staged_pipeline._stage import Feeder, SeenStore, SetSeenStore, Stage, StageContext
 
 try:
     __version__ = version("staged-pipeline")
@@ -43,6 +43,7 @@ __all__ = [
     "Error",
     "ErrorRate",
     "Expo",
+    "Feeder",
     "Fixed",
     "MonotonicClock",
     "NoSuccess",
@@ -50,6 +51,8 @@ __all__ = [
     "Pipeline",
     "Retry",
     "RoutingError",
+    "SeenStore",
+    "SetSeenStore",
     "Skip",
     "Stage",
     "StageAborted",
