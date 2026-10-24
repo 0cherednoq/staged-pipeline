@@ -118,6 +118,16 @@ class Pipeline:
         self._stages[name] = stage
         return stage
 
+    @property
+    def clock(self) -> Clock:
+        """Часы пайплайна."""
+        return self._clock
+
+    @property
+    def started(self) -> bool:
+        """Запущен ли пайплайн (есть реестр счётчиков)."""
+        return self._ledger is not None
+
     def counts(self, name: str) -> StageCounts:
         """Счётчики стадии после (или во время) прогона."""
         if self._ledger is None:
