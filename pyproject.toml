@@ -56,7 +56,7 @@ packages = ["src/staged_pipeline"]
 lint = [
     "ruff==0.17.2",
     "mypy==2.4.0",
-    "basedpyright==1.40.1",
+    "basedpyright==1.40.2",
     "import-linter==2.15",
     "validate-pyproject==0.26",
 ]
