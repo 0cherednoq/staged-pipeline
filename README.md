@@ -86,6 +86,7 @@ asyncio.run(main())
 
 ## Документация
 
+- [Руководство по задачам (юз-кейсы с примерами)](docs/guide.md)
 - [Архитектура и API](docs/architecture.md)
 - [Prior art / ресёрч](docs/research.md)
 - [План реализации](docs/plan/PLAN.md) · [прогресс](docs/plan/PROGRESS.md) ·
