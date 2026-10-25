@@ -67,7 +67,7 @@ test = [
     "pytest-timeout==2.4.0",
     "hypothesis==6.168.1",
     # coverage закреплён на кэшированную версию (pytest-cov тянет новее, блоба нет — D-009).
-    "coverage==7.15.4",
+    "coverage==7.16.2",
 ]
 dev = [
     { include-group = "lint" },
