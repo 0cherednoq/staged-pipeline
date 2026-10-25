@@ -4,6 +4,9 @@ on:
   push:
     tags: ["v*"]
 
+env:
+  PYTHONUTF8: "1"
+
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false

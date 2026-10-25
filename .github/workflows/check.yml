@@ -6,6 +6,11 @@ on:
   pull_request:
   workflow_call:
 
+# UTF-8 вывод на всех ОС: инструменты (import-linter, pytest) печатают русский
+# текст, а Windows-консоль по умолчанию не UTF-8 → UnicodeEncodeError.
+env:
+  PYTHONUTF8: "1"
+
 concurrency:
   group: check-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
