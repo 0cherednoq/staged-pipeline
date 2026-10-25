@@ -25,9 +25,9 @@ jobs:
       - name: тег совпадает с версией
         run: |
           tag="${GITHUB_REF_NAME#v}"
-          ver=$(uv run --no-sync python -c "import staged_pipeline; print(staged_pipeline.__version__)")
+          ver=$(uv run --no-sync python -c "import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text('utf-8'))['project']['version'])")
           if [ "$tag" != "$ver" ]; then
-            echo "тег '$tag' не совпадает с версией пакета '$ver'"
+            echo "тег '$tag' не совпадает с версией в pyproject '$ver'"
             exit 1
           fi
       - run: uv run --with twine twine check --strict dist/*
