@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """Идемпотентная настройка GitHub-репозитория из .env (PLAN.md T7.1).
 
 Только stdlib (без python-dotenv). Читает .env сам, вызывает `gh` с `GH_TOKEN`
