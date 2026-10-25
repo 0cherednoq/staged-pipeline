@@ -58,7 +58,7 @@ lint = [
     "mypy==2.4.0",
     "basedpyright==1.40.1",
     "import-linter==2.15",
-    "validate-pyproject==0.26",
+    "validate-pyproject==0.27",
 ]
 test = [
     "pytest==9.1.1",

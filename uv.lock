@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.13"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -862,14 +862,14 @@ dev = [
     { name = "pytest-cov", specifier = "==7.1.0" },
     { name = "pytest-timeout", specifier = "==2.4.0" },
     { name = "ruff", specifier = "==0.17.2" },
-    { name = "validate-pyproject", specifier = "==0.26" },
+    { name = "validate-pyproject", specifier = "==0.27" },
 ]
 lint = [
     { name = "basedpyright", specifier = "==1.40.1" },
     { name = "import-linter", specifier = "==2.15" },
     { name = "mypy", specifier = "==2.4.0" },
     { name = "ruff", specifier = "==0.17.2" },
-    { name = "validate-pyproject", specifier = "==0.26" },
+    { name = "validate-pyproject", specifier = "==0.27" },
 ]
 test = [
     { name = "coverage", specifier = "==7.15.4" },
@@ -891,14 +891,14 @@ wheels = [
 
 [[package]]
 name = "validate-pyproject"
-version = "0.26"
+version = "0.27"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastjsonschema" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c9/ac/5a51cd7e1c294d1bd3389d792617e015d3eda981242c1bbd8b21ee7c8725/validate_pyproject-0.26.tar.gz", hash = "sha256:eb3e48eeed404761ca4bb45a91d1fa82d83bbaf3aedcfca4ee9483b4bb3e2b9e", size = 122053, upload-time = "2026-08-19T16:09:43.617Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/63/c2/d5ee2411f77704c8d89d8dff5f66402071aea82515cd0363b21e6ca37889/validate_pyproject-0.27.tar.gz", hash = "sha256:324cd1258b0b162968bba6a0ff4a610c8d13074be7e2097661c5702c22043d43", size = 121905, upload-time = "2026-10-22T11:55:49.133Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0b/de/0fdee664da979fc0dd99398da63ccf228cb21de46a154dbc19fbf43e4d29/validate_pyproject-0.26-py3-none-any.whl", hash = "sha256:ab3fa448d7178d44d1b06e4b526ab5136e3faa7a1b7e7c6320c8a17fc11a9a2e", size = 56119, upload-time = "2026-08-19T16:09:42.471Z" },
+    { url = "https://files.pythonhosted.org/packages/8c/40/99e7bea355b2bb74fdee5d8b6faef5efb5ff1a812030cff160d304a1fbd4/validate_pyproject-0.27-py3-none-any.whl", hash = "sha256:6ad8a9a80480a5a833753f4e1c1b22cb01b8a5ad0015b1e9dbd4a5f8e898aba0", size = 55852, upload-time = "2026-10-22T11:55:47.988Z" },
 ]
 
 [[package]]
