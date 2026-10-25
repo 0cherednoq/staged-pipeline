@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
       - run: uv build
       - name: тег совпадает с версией
         run: |
@@ -42,7 +42,7 @@ jobs:
         py: ["3.13", "3.14"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: ${{ matrix.py }}
       - uses: actions/download-artifact@v4
