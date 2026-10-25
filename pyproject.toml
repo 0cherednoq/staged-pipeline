@@ -65,7 +65,7 @@ test = [
     "pytest-asyncio==1.4.0",
     "pytest-cov==7.1.0",
     "pytest-timeout==2.4.0",
-    "hypothesis==6.168.1",
+    "hypothesis==6.170.5",
     # coverage закреплён на кэшированную версию (pytest-cov тянет новее, блоба нет — D-009).
     "coverage==7.15.4",
 ]
