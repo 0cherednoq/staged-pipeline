@@ -8,8 +8,8 @@
 
 | ID | Критичность | Место | Статус | Коммит |
 |---|---|---|---|---|
-| V2 | critical | `drain()` + bounded `put` → ложный сбой вместо остановки | fixed | — |
-| V4 | high | исключение в `Observer` роняет пайплайн | fixed | — |
+| V2 | critical | `drain()` + bounded `put` → ложный сбой вместо остановки | fixed | `3694468` |
+| V4 | high | исключение в `Observer` роняет пайплайн | fixed | `3694468` |
 | V1 | high | `ctx.incr`/`ctx.label` из sync-хендлера (`executor="thread"`) — гонка | open | |
 | V3 | medium | `executor="thread"`: `workers=` упирается в дефолтный пул; `to_thread` не отменяется | open | |
 | V5 | medium | unbounded по умолчанию → OOM; `warn_queued` только предупреждает | open | |
@@ -37,6 +37,8 @@
 Семантически emit в закрытую стадию всегда дроп, а в нормальной работе downstream не может
 закрыться, пока upstream пишет, — так что маскировки реальных багов нет.
 
+**Исправлено** в `3694468` (регресс-тест `test_v2_drain_with_bounded_put_is_graceful`).
+
 ### V4 · high · исключение в `Observer` роняет пайплайн
 
 **Симптом.** `observer.item_finished`/`stage_closed`/`breaker_tripped`/`queued_warning` зовутся
@@ -44,6 +46,8 @@
 
 **Исправление.** Пайплайн оборачивает наблюдателя в `_SafeObserver`: каждый вызов в try/except,
 исключение логируется и проглатывается. Наблюдение не влияет на исход прогона.
+
+**Исправлено** в `3694468` (регресс-тесты в `tests/test_audit_fixes.py`).
 
 ## Риски первого запуска (не баги кода, снимаются на CI)
 
