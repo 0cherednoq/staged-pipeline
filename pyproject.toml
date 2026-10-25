@@ -140,7 +140,7 @@ known-first-party = ["staged_pipeline"]
 "unittest.mock.patch".msg = "Запрещено (§0.3): без monkeypatching реального кода."
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107", "ANN", "PLR2004", "SLF001", "INP001", "N818", "PLR0913"]
+"tests/**" = ["S101", "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107", "ANN", "ARG002", "PLR2004", "SLF001", "INP001", "N818", "PLR0913"]
 "examples/**" = ["D", "INP001", "T201", "ANN"]
 "scripts/**" = ["D", "INP001", "T201", "S603", "S607"]
 

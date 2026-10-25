@@ -299,10 +299,16 @@ async def offer(
             ledger.transition(name, Event.DUPLICATE)
             return
     ledger.transition(name, Event.ACCEPT)
-    if nowait:
-        inbox.put_nowait(Envelope(item))
-    else:
-        await inbox.put(Envelope(item))
+    try:
+        if nowait:
+            inbox.put_nowait(Envelope(item))
+        else:
+            await inbox.put(Envelope(item))
+    except StageClosedError:
+        # Стадия закрылась, пока мы ждали место (cancel/drain): элемент не сбой, а
+        # отменённый остаток (V2). Балансируем принятый ACCEPT учётом cancelled.
+        ledger.transition(name, Event.CANCEL_QUEUED, count=1)
+        ledger.incr(name, "dropped_on_stop")
 
 
 async def _emit(stage: Stage, out: object, stages: dict[str, Stage], ledger: Ledger) -> None:

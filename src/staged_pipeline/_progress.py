@@ -24,6 +24,7 @@ __all__ = [
     "StageState",
     "StageView",
     "build_pipeline_view",
+    "safe_observer",
 ]
 
 _SAMPLE_CAP = 20
@@ -190,6 +191,54 @@ class LoggingObserver:
     def queued_warning(self, stage: str, queued: int) -> None:
         """Залогировать переполнение очереди (WARNING)."""
         self._log.warning("стадия %s: очередь выросла до %d", stage, queued)
+
+
+class _SafeObserver:
+    """Обёртка наблюдателя: исключения методов логируются и проглатываются (V4).
+
+    Наблюдение не должно влиять на исход прогона — кривой пользовательский observer
+    или падение логгера не роняют пайплайн.
+    """
+
+    def __init__(self, inner: Observer, log: logging.Logger) -> None:
+        """Обернуть наблюдателя `inner`."""
+        self._inner: Observer = inner
+        self._log: logging.Logger = log
+
+    def stage_closed(self, stage: str) -> None:
+        """Делегировать, проглотив исключение."""
+        try:
+            self._inner.stage_closed(stage)
+        except Exception:  # noqa: BLE001  # изоляция observer (V4): любое исключение глушим
+            self._log.exception("observer.stage_closed упал")
+
+    def item_finished(
+        self, stage: str, key: object, outcome: str, exc: BaseException | None
+    ) -> None:
+        """Делегировать, проглотив исключение."""
+        try:
+            self._inner.item_finished(stage, key, outcome, exc)
+        except Exception:  # noqa: BLE001  # изоляция observer (V4): любое исключение глушим
+            self._log.exception("observer.item_finished упал")
+
+    def breaker_tripped(self, stage: str, reason: str) -> None:
+        """Делегировать, проглотив исключение."""
+        try:
+            self._inner.breaker_tripped(stage, reason)
+        except Exception:  # noqa: BLE001  # изоляция observer (V4): любое исключение глушим
+            self._log.exception("observer.breaker_tripped упал")
+
+    def queued_warning(self, stage: str, queued: int) -> None:
+        """Делегировать, проглотив исключение."""
+        try:
+            self._inner.queued_warning(stage, queued)
+        except Exception:  # noqa: BLE001  # изоляция observer (V4): любое исключение глушим
+            self._log.exception("observer.queued_warning упал")
+
+
+def safe_observer(inner: Observer, log: logging.Logger) -> Observer:
+    """Обернуть наблюдателя защитой от исключений (V4)."""
+    return _SafeObserver(inner, log)
 
 
 def _incoming(specs: Sequence[StageSpec]) -> dict[str, list[str]]:

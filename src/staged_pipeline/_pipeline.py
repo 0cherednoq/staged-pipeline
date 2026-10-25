@@ -24,6 +24,7 @@ from staged_pipeline._progress import (
     PipelineView,
     StageState,
     build_pipeline_view,
+    safe_observer,
 )
 from staged_pipeline._stage import Stage, offer, run_worker
 from staged_pipeline._supervisor import Supervisor
@@ -64,7 +65,7 @@ class Pipeline:
         self.name: str = name
         self._clock: Clock = clock or MonotonicClock()
         self._log: logging.Logger = log or _log
-        self._observer: Observer = observer or LoggingObserver(self._log)
+        self._observer: Observer = safe_observer(observer or LoggingObserver(self._log), self._log)
         self._stages: dict[str, Stage] = {}
         self._ran: bool = False
         self._ledger: Ledger | None = None
